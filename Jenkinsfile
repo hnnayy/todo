@@ -44,6 +44,7 @@ pipeline {
         stage('Build Application') {
             steps {
                 echo 'Starting Build Application stage'
+                bat 'git config --global --add safe.directory C:/flutter'
                 bat 'flutter pub get'
                 bat 'flutter build apk --debug'
                 echo 'Build Application completed successfully'
