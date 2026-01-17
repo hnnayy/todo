@@ -51,6 +51,40 @@ pipeline {
             }
         }
 
+        // SAST Mobile using MobSF
+        stage('SAST Mobile') {
+            steps {
+                script {
+                    echo 'Running Static Application Security Testing (SAST) using MobSF'
+                    // Upload APK to MobSF
+                    def uploadResponse = bat(script: 'curl -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
+                    def uploadJson = readJSON text: uploadResponse
+                    def apkHash = uploadJson.hash
+                    echo "APK uploaded with hash: ${apkHash}"
+                    env.APK_HASH = apkHash
+
+                    // Scan the APK
+                    def scanResponse = bat(script: "curl -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    def scanJson = readJSON text: scanResponse
+                    echo "Scan completed for hash: ${apkHash}"
+
+                    // Get JSON report
+                    def reportResponse = bat(script: "curl -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    def reportJson = readJSON text: reportResponse
+                    echo "SAST Report generated"
+
+                    // Check for high-risk vulnerabilities (example: if security_score < 50, fail)
+                    if (reportJson.security_score < 50) {
+                        error 'SAST found high-risk vulnerabilities. Pipeline failed.'
+                    }
+
+                    // Archive report
+                    writeFile file: 'sast_report.json', text: reportResponse
+                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: false
+                }
+            }
+        }
+
         // Verify if the debug APK was generated
         stage('Verify Generated APK') {
             steps {
@@ -143,6 +177,45 @@ pipeline {
             steps {
                 echo "Installing APK on emulator from ${env.APK_PATH}"
                 bat "adb install -r \"${env.APK_PATH}\""
+            }
+        }
+
+        // DAST Mobile using MobSF
+        stage('DAST Mobile') {
+            steps {
+                script {
+                    echo 'Running Dynamic Application Security Testing (DAST) using MobSF'
+                    // Assume apkHash is available from SAST stage (store in env or file)
+                    // For simplicity, re-upload or use stored hash. Here, assume we have apkHash from previous stage.
+                    // In practice, pass apkHash via environment variable or file.
+
+                    // Start Dynamic Analysis
+                    def startResponse = bat(script: "curl -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    def startJson = readJSON text: startResponse
+                    echo "Dynamic analysis started"
+
+                    // Optionally, run some tests or wait
+                    sleep(time: 30, unit: 'SECONDS')  // Simulate running app and tests
+
+                    // Stop Dynamic Analysis
+                    bat(script: "curl -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    echo "Dynamic analysis stopped"
+
+                    // Get Dynamic Report
+                    def dastReportResponse = bat(script: "curl -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    def dastReportJson = readJSON text: dastReportResponse
+                    echo "DAST Report generated"
+
+                    // Check for issues (example: if trackers detected > 0, warn or fail)
+                    if (dastReportJson.trackers?.detected_trackers > 0) {
+                        echo 'Warning: Trackers detected in DAST'
+                        // Optional: error 'DAST found trackers. Pipeline failed.'
+                    }
+
+                    // Archive report
+                    writeFile file: 'dast_report.json', text: dastReportResponse
+                    archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: false
+                }
             }
         }
 
