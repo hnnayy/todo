@@ -1,4 +1,38 @@
-import groovy.json.JsonSlurperClassic // Import library untuk parsing JSON
+import groovy.json.JsonSlurperClassic 
+
+// --- BAGIAN 1: Helper Methods (NonCPS) ---
+// Kita pisahkan logika Regex di sini agar tidak menyebabkan error "NotSerializableException"
+// Jenkins tidak akan mencoba menyimpan state variabel di dalam method @NonCPS.
+
+@NonCPS
+def extractHashFromResponse(String response) {
+    def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
+    if (matcher.find()) {
+        return matcher.group(1)
+    }
+    return ""
+}
+
+@NonCPS
+def extractScoreFromResponse(String response) {
+    def matcher = response =~ /"security_score"\s*:\s*(\d+)/
+    if (matcher.find()) {
+        return matcher.group(1).toInteger()
+    }
+    return 0
+}
+
+@NonCPS
+def parseJsonSafely(String jsonText) {
+    // Fungsi ini membungkus JsonSlurper agar lebih aman dipanggil
+    try {
+        def slurper = new JsonSlurperClassic()
+        return slurper.parseText(jsonText)
+    } catch (Exception e) {
+        return null
+    }
+}
+// ------------------------------------------
 
 pipeline {
     agent any
@@ -50,7 +84,7 @@ pipeline {
             }
         }
 
-        // SAST Mobile using MobSF (UPDATED FIX)
+        // SAST Mobile using MobSF (FIXED SERIALIZATION ERROR)
         stage('SAST Mobile') {
             steps {
                 script {
@@ -59,13 +93,8 @@ pipeline {
                     // 1. Upload APK
                     def uploadResponse = bat(script: 'curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
                     
-                    // Regex untuk ambil Hash
-                    String apkHash = ""
-                    def hashMatch = uploadResponse =~ /"hash"\s*:\s*"([^"]+)"/
-                    if (hashMatch.find()) {
-                        apkHash = hashMatch.group(1)
-                    }
-                    hashMatch = null 
+                    // MENGGUNAKAN METHOD @NonCPS (Aman dari error Serialization)
+                    String apkHash = extractHashFromResponse(uploadResponse)
 
                     if (apkHash == "") {
                         error "Failed to parse hash. Response: ${uploadResponse}"
@@ -78,79 +107,70 @@ pipeline {
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     echo "Scan completed."
 
-                    // 3. Get JSON Report (Wajib)
+                    // 3. Get JSON Report
                     def reportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     writeFile file: 'sast_report.json', text: reportResponse
                     echo "SAST JSON Report saved."
 
-                    // 4. Try Get PDF Report (Handle Error wkhtmltopdf)
+                    // 4. Try Get PDF Report (Robust Handling)
                     echo "Attempting to download PDF Report..."
-                    // Download ke file sementara dulu
+                    // Download ke file sementara
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/download_pdf --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\" -o sast_report_temp.pdf")
                     
-                    // Cek isi file apakah PDF asli atau pesan Error JSON
+                    // Cek isi file apakah PDF valid atau error text
                     def pdfContent = readFile('sast_report_temp.pdf')
+                    
+                    // Jika file mengandung kata "wkhtmltopdf", berarti error dari server
                     if (pdfContent.contains("wkhtmltopdf") || pdfContent.contains("Cannot Generate PDF")) {
                         echo "=================================================================================="
-                        echo "WARNING: MobSF gagal membuat PDF karena 'wkhtmltopdf' tidak terinstall di server."
-                        echo "Solusi: Install https://wkhtmltopdf.org/downloads.html di komputer MobSF."
-                        echo "Mengaktifkan FALLBACK MODE: Membuat laporan HTML manual agar tetap User Friendly."
+                        echo "WARNING: MobSF gagal membuat PDF. Mengaktifkan FALLBACK MODE (HTML)."
+                        echo "PENTING: Anda harus menginstall wkhtmltopdf di server MobSF untuk fix permanen."
                         echo "=================================================================================="
                         
                         // --- FALLBACK: GENERATE HTML FROM JSON ---
-                        try {
-                            def json = new groovy.json.JsonSlurperClassic().parseText(reportResponse)
-                            
-                            // Ambil data penting
+                        // Menggunakan helper method @NonCPS untuk parsing JSON
+                        def json = parseJsonSafely(reportResponse)
+                        
+                        if (json != null) {
                             def score = json.security_score ?: 0
                             def appName = json.app_name ?: "Unknown App"
-                            def version = json.version_name ?: "1.0"
                             
-                            // Buat file HTML sederhana
                             def htmlContent = """
                             <html>
-                            <head><style>body{font-family:Arial,sans-serif;} .header{background:#333;color:#fff;padding:10px;} .card{border:1px solid #ddd;padding:15px;margin:10px 0;} .score{font-size:24px;font-weight:bold;color:${score < 50 ? 'red' : 'green'};}</style></head>
+                            <head><style>body{font-family:Arial;} .card{border:1px solid #ddd;padding:20px;margin:20px;}</style></head>
                             <body>
-                                <div class="header"><h1>MobSF Security Report (Fallback)</h1></div>
                                 <div class="card">
-                                    <h2>Application Info</h2>
+                                    <h1>MobSF Security Report</h1>
                                     <p><b>App Name:</b> ${appName}</p>
-                                    <p><b>Version:</b> ${version}</p>
-                                    <p><b>Security Score:</b> <span class="score">${score}/100</span></p>
-                                </div>
-                                <div class="card">
-                                    <h3>Note:</h3>
-                                    <p>PDF Report asli tidak dapat dibuat karena server error (Missing wkhtmltopdf). Silakan lihat detail lengkap di file <b>sast_report.json</b>.</p>
+                                    <p><b>Security Score:</b> ${score}/100</p>
+                                    <hr>
+                                    <p><i>PDF Report failed to generate. Please check sast_report.json for details.</i></p>
                                 </div>
                             </body>
                             </html>
                             """
                             writeFile file: 'sast_report.html', text: htmlContent
-                            echo "Fallback HTML report generated as sast_report.html"
-                            
-                            // Hapus file pdf yang corrupt/berisi error
-                            bat "del sast_report_temp.pdf"
-                        } catch (Exception e) {
-                            echo "Gagal membuat fallback HTML: ${e.getMessage()}"
+                            echo "Fallback HTML generated."
+                            bat "del sast_report_temp.pdf" // Hapus file error
+                        } else {
+                            echo "Gagal parsing JSON untuk Fallback HTML."
                         }
                     } else {
-                        // Jika berhasil (bukan error), rename jadi pdf valid
                         echo "PDF generated successfully."
                         bat "move sast_report_temp.pdf sast_report.pdf"
                     }
 
-                    // Score Check Logic
-                    Integer scoreVal = 0
-                    def scoreMatch = reportResponse =~ /"security_score"\s*:\s*(\d+)/
-                    if (scoreMatch.find()) {
-                        scoreVal = scoreMatch.group(1).toInteger()
-                    }
+                    // Score Check Logic (Menggunakan @NonCPS method)
+                    Integer scoreVal = extractScoreFromResponse(reportResponse)
                     
+                    if (scoreVal < 10) {
+                         echo "Security Score is: ${scoreVal}"
+                    }
                     if (scoreVal < 50) {
                         echo 'Warning: Low Security Score detected!'
                     }
 
-                    // Archive artifacts (JSON + PDF/HTML if exist)
+                    // Archive artifacts
                     archiveArtifacts artifacts: 'sast_report.json, sast_report.pdf, sast_report.html', allowEmptyArchive: true
                 }
             }
@@ -209,13 +229,12 @@ pipeline {
         stage('Wait for Emulator to Boot') {
             steps {
                 script {
-                    echo 'Waiting for boot animation to stop...'
-                    sleep(time: 10, unit: 'SECONDS') // Simple wait backup
-                    // Logic check bootanim (simplified for robustness)
+                    echo 'Waiting for boot animation...'
+                    sleep(time: 15, unit: 'SECONDS')
                     try {
                         bat 'adb shell getprop init.svc.bootanim'
                     } catch (Exception e) {
-                        echo "Warning: could not check bootanim status"
+                        echo "Warning: Checking bootanim failed, proceeding anyway..."
                     }
                 }
             }
@@ -247,16 +266,14 @@ pipeline {
                     // Get JSON Report
                     def dastReportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // Parse & Save
                     writeFile file: 'dast_report.json', text: dastReportResponse
                     
-                    // --- Parsing JSON Check ---
-                    try {
-                        def jsonSlurper = new groovy.json.JsonSlurperClassic()
-                        def dastReportObj = jsonSlurper.parseText(dastReportResponse)
+                    // Cek validitas JSON DAST menggunakan helper method @NonCPS
+                    def jsonCheck = parseJsonSafely(dastReportResponse)
+                    if (jsonCheck != null) {
                         echo "DAST Report JSON valid."
-                    } catch (Exception e) {
-                        echo "Warning: DAST JSON might be incomplete."
+                    } else {
+                         echo "Warning: DAST JSON might be incomplete."
                     }
 
                     archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: false
