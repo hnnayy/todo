@@ -51,11 +51,21 @@ pipeline {
 
         stage('Prepare Folders') {
             steps {
+                // Hanya membuat folder jika belum ada
                 bat 'if not exist apk-outputs mkdir apk-outputs'
                 bat "if not exist \"${env.APK_OUTPUT_DIR}\" mkdir \"${env.APK_OUTPUT_DIR}\""
-                bat "del /Q \"${env.APK_OUTPUT_DIR}\\*\"" 
             }
         }
+
+        // --- STAGE BARU YANG DITAMBAHKAN ---
+        // Clean the C:\ApksGenerated folder before storing new APK
+        stage('Clean Folder C:\\ApksGenerated') {
+            steps {
+                echo "Cleaning ${env.APK_OUTPUT_DIR} folder before copying the new APK."
+                bat "del /Q \"${env.APK_OUTPUT_DIR}\\*\""
+            }
+        }
+        // -----------------------------------
 
         stage('Build Application') {
             steps {
