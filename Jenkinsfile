@@ -92,7 +92,8 @@ pipeline {
                     if (!emulatorStatus.contains("emulator")) {
                         echo 'Emulator not running. Starting Android emulator with wiped data...'
                         bat """
-                            start "Emulator" "${env.ANDROID_HOME}\\emulator\\emulator.exe" -avd "${env.AVD_NAME}" -no-window -no-audio -gpu swiftshader_indirect
+                            start "Emulator" "${env.ANDROID_HOME}\\emulator\\emulator.exe" -avd "${env.AVD_NAME}" -no-window -no-audio -gpu swiftshader_indirect -wipe-data
+                            timeout /t 30 /nobreak > nul
                             "${env.ANDROID_HOME}\\platform-tools\\adb.exe" wait-for-device
                         """
                         // Wait for a while to ensure the emulator initializes completely
