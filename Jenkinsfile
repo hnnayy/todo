@@ -1,11 +1,9 @@
 import groovy.json.JsonSlurperClassic 
-import groovy.json.JsonOutput 
 
-// --- HELPER METHODS (Robust JSON Cleaner) ---
+// --- HELPER METHODS (Optimized for Memory) ---
 
 @NonCPS
 def extractHashFromResponse(String response) {
-    // Cari text di dalam tanda kutip setelah "hash":
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
     if (matcher.find()) {
         return matcher.group(1)
@@ -14,79 +12,56 @@ def extractHashFromResponse(String response) {
 }
 
 @NonCPS
-def cleanAndParseJson(String rawOutput) {
-    // 1. Cari kurung kurawal pembuka '{' pertama
+def cleanJsonString(String rawOutput) {
+    // Cari kurung kurawal pembuka dan penutup untuk membuang log sampah Windows
     int firstBrace = rawOutput.indexOf('{')
-    // 2. Cari kurung kurawal penutup '}' terakhir
     int lastBrace = rawOutput.lastIndexOf('}')
 
     if (firstBrace == -1 || lastBrace == -1) {
-        throw new Exception("No valid JSON found in output. Raw output start: " + rawOutput.take(100))
+        return null
     }
-
-    // 3. Potong string hanya ambil dari '{' sampai '}'
-    String cleanJsonString = rawOutput.substring(firstBrace, lastBrace + 1)
-
-    // 4. Parse
-    def slurper = new JsonSlurperClassic()
-    return slurper.parseText(cleanJsonString)
+    return rawOutput.substring(firstBrace, lastBrace + 1)
 }
 
 @NonCPS
-def generateReadableReports(String type, String rawJson) {
-    def prettyJson = ""
-    def htmlContent = ""
+def generateHtmlSummary(String type, def jsonObj) {
+    // Kita ambil data seperlunya saja agar ringan
+    def score = jsonObj.security_score ?: 0
+    def appName = jsonObj.app_name ?: "Unknown"
+    def version = jsonObj.version_name ?: "1.0"
     
-    try {
-        // --- STEP PENTING: Bersihkan Output Windows sebelum Parse ---
-        def jsonObj = cleanAndParseJson(rawJson)
-        // ------------------------------------------------------------
+    def scoreColor = score < 50 ? '#e74c3c' : (score < 75 ? '#f39c12' : '#27ae60')
 
-        // Buat JSON Rapi
-        prettyJson = JsonOutput.prettyPrint(JsonOutput.toJson(jsonObj))
-        
-        // Data untuk HTML
-        def score = jsonObj.security_score ?: 0
-        def appName = jsonObj.app_name ?: "Unknown"
-        def version = jsonObj.version_name ?: "1.0"
-        
-        // Warna Score
-        def scoreColor = score < 50 ? '#e74c3c' : (score < 75 ? '#f39c12' : '#27ae60')
-
-        // Buat HTML Summary
-        htmlContent = """
-        <html>
-        <head>
-            <style>
-                body { font-family: sans-serif; padding: 20px; background: #f0f0f0; }
-                .card { background: white; padding: 30px; border-radius: 8px; max-width: 600px; margin: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-                h1 { border-bottom: 2px solid #eee; color: #333; }
-                .score { font-size: 50px; font-weight: bold; color: ${scoreColor}; text-align: center; margin: 20px 0; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                td, th { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h1>${type.toUpperCase()} Report Summary</h1>
-                <div class="score">${score}/100</div>
-                <table>
-                    <tr><th>App Name</th><td>${appName}</td></tr>
-                    <tr><th>Version</th><td>${version}</td></tr>
-                    <tr><th>Scan Type</th><td>${type.toUpperCase()}</td></tr>
-                </table>
-                <p><i>Check <b>${type}_report_pretty.json</b> artifact for full details.</i></p>
+    return """
+    <html>
+    <head>
+        <style>
+            body { font-family: sans-serif; padding: 20px; background: #f0f0f0; }
+            .card { background: white; padding: 30px; border-radius: 8px; max-width: 600px; margin: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            h1 { border-bottom: 2px solid #eee; color: #333; }
+            .score { font-size: 50px; font-weight: bold; color: ${scoreColor}; text-align: center; margin: 20px 0; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            td, th { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
+            .note { margin-top: 20px; font-size: 0.9em; color: #666; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>${type.toUpperCase()} Report Summary</h1>
+            <div class="score">${score}/100</div>
+            <table>
+                <tr><th>App Name</th><td>${appName}</td></tr>
+                <tr><th>Version</th><td>${version}</td></tr>
+                <tr><th>Scan Type</th><td>${type.toUpperCase()}</td></tr>
+            </table>
+            <div class="note">
+                <p><b>Note:</b> Full details are in the attached <b>${type}_report.json</b>.</p>
+                <p><i>Tip: Open the JSON file in VS Code or a Browser to view it formatted.</i></p>
             </div>
-        </body>
-        </html>
-        """
-
-    } catch (Exception e) {
-        prettyJson = "ERROR PARSING JSON: \n" + e.getMessage() + "\n\n--- RAW OUTPUT ---\n" + rawJson
-        htmlContent = "<html><body><h1>Report Generation Failed</h1><p>${e.getMessage()}</p></body></html>"
-    }
-
-    return [pretty: prettyJson, html: htmlContent]
+        </div>
+    </body>
+    </html>
+    """
 }
 // -----------------------------------------------------------------------
 
@@ -134,7 +109,8 @@ pipeline {
                 script {
                     echo 'Running SAST...'
                     
-                    // Note: Tanda @ di depan curl berfungsi agar command tidak di-echo ulang ke output
+                    // 1. Upload
+                    // Menggunakan @curl untuk menyembunyikan output command di log agar parsing lebih bersih
                     def uploadResponse = bat(script: '@curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
                     String apkHash = extractHashFromResponse(uploadResponse)
                     
@@ -142,19 +118,37 @@ pipeline {
                     env.APK_HASH = apkHash
                     echo "SAST Hash: ${apkHash}"
 
-                    // Scan
+                    // 2. Scan
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
-                    // Get JSON Report
-                    def rawJson = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    // 3. Get JSON Report
+                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
-                    // Generate Readable Report
-                    def results = generateReadableReports("sast", rawJson)
-
-                    writeFile file: 'sast_report_pretty.json', text: results.pretty
-                    writeFile file: 'sast_summary.html', text: results.html
+                    // 4. Process Report (Memory Efficient)
+                    try {
+                        String jsonString = cleanJsonString(rawOutput)
+                        
+                        if (jsonString != null) {
+                            // Simpan file JSON langsung (Tanpa Pretty Print di Memory) agar tidak OOM
+                            writeFile file: 'sast_report.json', text: jsonString
+                            
+                            // Parse hanya untuk HTML summary
+                            def slurper = new JsonSlurperClassic()
+                            def jsonObj = slurper.parseText(jsonString)
+                            def htmlContent = generateHtmlSummary("sast", jsonObj)
+                            writeFile file: 'sast_summary.html', text: htmlContent
+                        } else {
+                            echo "WARNING: Failed to clean JSON output. Saving raw output."
+                            writeFile file: 'sast_report_raw.txt', text: rawOutput
+                        }
+                    } catch (Exception e) {
+                        echo "WARNING: Failed to process SAST report (likely too big for memory). Raw report saved."
+                        // Tetap simpan raw output agar user bisa download
+                        writeFile file: 'sast_report_error.json', text: rawOutput
+                    }
                     
-                    archiveArtifacts artifacts: 'sast_report_pretty.json, sast_summary.html', allowEmptyArchive: false
+                    // Archive (Allow empty in case of severe error)
+                    archiveArtifacts artifacts: 'sast_report.json, sast_summary.html, sast_report_raw.txt, sast_report_error.json', allowEmptyArchive: true
                 }
             }
         }
@@ -200,15 +194,28 @@ pipeline {
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
                     // Get JSON Report
-                    def rawJson = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
-                    // Generate Readable Report
-                    def results = generateReadableReports("dast", rawJson)
+                    // Process Report (Memory Efficient)
+                    try {
+                        String jsonString = cleanJsonString(rawOutput)
+                        
+                        if (jsonString != null) {
+                            writeFile file: 'dast_report.json', text: jsonString
+                            
+                            def slurper = new JsonSlurperClassic()
+                            def jsonObj = slurper.parseText(jsonString)
+                            def htmlContent = generateHtmlSummary("dast", jsonObj)
+                            writeFile file: 'dast_summary.html', text: htmlContent
+                        } else {
+                            writeFile file: 'dast_report_raw.txt', text: rawOutput
+                        }
+                    } catch (Exception e) {
+                        echo "WARNING: Failed to process DAST report. Saving raw."
+                        writeFile file: 'dast_report_error.json', text: rawOutput
+                    }
 
-                    writeFile file: 'dast_report_pretty.json', text: results.pretty
-                    writeFile file: 'dast_summary.html', text: results.html
-
-                    archiveArtifacts artifacts: 'dast_report_pretty.json, dast_summary.html', allowEmptyArchive: false
+                    archiveArtifacts artifacts: 'dast_report.json, dast_summary.html, dast_report_raw.txt, dast_report_error.json', allowEmptyArchive: true
                 }
             }
         }
