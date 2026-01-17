@@ -60,10 +60,10 @@ pipeline {
                     def uploadResponse = bat(script: 'curl -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
                     // Parse hash manually (assuming JSON format: {"hash": "value"})
                     def hashMatch = uploadResponse =~ /"hash"\s*:\s*"([^"]+)"/
-                    if (!hashMatch) {
+                    if (!hashMatch.find()) {
                         error 'Failed to parse hash from MobSF upload response'
                     }
-                    def apkHash = hashMatch[0][1]
+                    def apkHash = hashMatch.group(1)
                     echo "APK uploaded with hash: ${apkHash}"
                     env.APK_HASH = apkHash
 
@@ -77,8 +77,8 @@ pipeline {
 
                     // Parse security_score manually
                     def scoreMatch = reportResponse =~ /"security_score"\s*:\s*(\d+)/
-                    if (scoreMatch) {
-                        def score = scoreMatch[0][1].toInteger()
+                    if (scoreMatch.find()) {
+                        def score = scoreMatch.group(1).toInteger()
                         if (score < 50) {
                             error 'SAST found high-risk vulnerabilities. Pipeline failed.'
                         }
