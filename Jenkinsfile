@@ -84,7 +84,14 @@ pipeline {
 
                     // Get JSON report
                     def reportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    echo "SAST Report generated"
+                    echo "SAST JSON Report generated"
+
+                    // --- NEW: Get PDF Report (User Friendly) ---
+                    // Menggunakan endpoint api/v1/download_pdf untuk mendapatkan report PDF
+                    echo "Downloading SAST PDF Report..."
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/download_pdf --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\" -o sast_report.pdf")
+                    echo "SAST PDF Report saved as sast_report.pdf"
+                    // -------------------------------------------
 
                     // --- FIX: Handle Regex Serialization for Score ---
                     Integer score = 0
@@ -102,9 +109,9 @@ pipeline {
                           }
                     }
 
-                    // Archive report
+                    // Archive report (Both JSON and PDF)
                     writeFile file: 'sast_report.json', text: reportResponse
-                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: false
+                    archiveArtifacts artifacts: 'sast_report.json, sast_report.pdf', allowEmptyArchive: false
                 }
             }
         }
@@ -226,11 +233,10 @@ pipeline {
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     echo "Dynamic analysis stopped"
 
-                    // Get Dynamic Report
+                    // Get Dynamic Report (JSON)
                     def dastReportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // --- PERBAIKAN DI SINI (FIX HERE) ---
-                    // Mengganti readJSON dengan JsonSlurperClassic agar tidak perlu plugin tambahan
+                    // --- Parsing JSON ---
                     echo "Parsing DAST Report JSON using JsonSlurperClassic..."
                     try {
                         def jsonSlurper = new groovy.json.JsonSlurperClassic()
@@ -239,7 +245,7 @@ pipeline {
                     } catch (Exception e) {
                         echo "Warning: Could not parse DAST JSON, but saving the raw file. Error: ${e.getMessage()}"
                     }
-                    // ------------------------------------
+                    // --------------------
 
                     // Archive report
                     writeFile file: 'dast_report.json', text: dastReportResponse
@@ -341,6 +347,8 @@ pipeline {
         success {
             archiveArtifacts artifacts: 'apk-outputs/todo-debug-*.apk', allowEmptyArchive: true
             archiveArtifacts artifacts: 'build/app/outputs/flutter-apk/app-release.apk', allowEmptyArchive: true
+            // Artifacts SAST dan DAST (PDF dan JSON) sudah di-archive di stage masing-masing, 
+            // tapi jika ingin memastikan di post action, bisa ditambahkan di sini juga.
         }
         failure {
             echo 'Build failed. No APK generated due to test failures.'
