@@ -58,24 +58,30 @@ pipeline {
                     echo 'Running Static Application Security Testing (SAST) using MobSF'
                     // Upload APK to MobSF
                     def uploadResponse = bat(script: 'curl -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
-                    def uploadJson = readJSON text: uploadResponse
-                    def apkHash = uploadJson.hash
+                    // Parse hash manually (assuming JSON format: {"hash": "value"})
+                    def hashMatch = uploadResponse =~ /"hash"\s*:\s*"([^"]+)"/
+                    if (!hashMatch) {
+                        error 'Failed to parse hash from MobSF upload response'
+                    }
+                    def apkHash = hashMatch[0][1]
                     echo "APK uploaded with hash: ${apkHash}"
                     env.APK_HASH = apkHash
 
                     // Scan the APK
                     def scanResponse = bat(script: "curl -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    def scanJson = readJSON text: scanResponse
                     echo "Scan completed for hash: ${apkHash}"
 
                     // Get JSON report
                     def reportResponse = bat(script: "curl -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    def reportJson = readJSON text: reportResponse
                     echo "SAST Report generated"
 
-                    // Check for high-risk vulnerabilities (example: if security_score < 50, fail)
-                    if (reportJson.security_score < 50) {
-                        error 'SAST found high-risk vulnerabilities. Pipeline failed.'
+                    // Parse security_score manually
+                    def scoreMatch = reportResponse =~ /"security_score"\s*:\s*(\d+)/
+                    if (scoreMatch) {
+                        def score = scoreMatch[0][1].toInteger()
+                        if (score < 50) {
+                            error 'SAST found high-risk vulnerabilities. Pipeline failed.'
+                        }
                     }
 
                     // Archive report
