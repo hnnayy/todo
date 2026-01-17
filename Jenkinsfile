@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurperClassic // Import library bawaan untuk parsing JSON
+
 pipeline {
     agent any
 
@@ -94,10 +96,10 @@ pipeline {
                     // -----------------------------------------------
 
                     if (score < 10) { 
-                         echo "Security Score is: ${score}"
-                         if (score < 50) {
+                          echo "Security Score is: ${score}"
+                          if (score < 50) {
                             echo 'Warning: Low Security Score detected!'
-                         }
+                          }
                     }
 
                     // Archive report
@@ -193,7 +195,7 @@ pipeline {
             }
         }
 
-        // Install the generated APK on the emulator (FIXED: Added Uninstall step)
+        // Install the generated APK on the emulator
         stage('Install APK on Emulator') {
             steps {
                 script {
@@ -227,9 +229,17 @@ pipeline {
                     // Get Dynamic Report
                     def dastReportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // Using readJSON to avoid regex serialization issues on large JSON
-                    def dastReportJson = readJSON text: dastReportResponse
-                    echo "DAST Report generated"
+                    // --- PERBAIKAN DI SINI (FIX HERE) ---
+                    // Mengganti readJSON dengan JsonSlurperClassic agar tidak perlu plugin tambahan
+                    echo "Parsing DAST Report JSON using JsonSlurperClassic..."
+                    try {
+                        def jsonSlurper = new groovy.json.JsonSlurperClassic()
+                        def dastReportObj = jsonSlurper.parseText(dastReportResponse)
+                        echo "DAST Report generated successfully."
+                    } catch (Exception e) {
+                        echo "Warning: Could not parse DAST JSON, but saving the raw file. Error: ${e.getMessage()}"
+                    }
+                    // ------------------------------------
 
                     // Archive report
                     writeFile file: 'dast_report.json', text: dastReportResponse
@@ -271,6 +281,8 @@ pipeline {
         stage('Publish Test Report (HTML)') {
             steps {
                 echo 'Publishing HTML Test Report'
+                // Note: publishHTML juga butuh plugin "HTML Publisher". 
+                // Jika error serupa muncul di sini, komen bagian ini atau install pluginnya.
                 publishHTML(target: [
                     allowMissing: true,
                     alwaysLinkToLastBuild: true,
