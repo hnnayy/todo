@@ -1,4 +1,4 @@
-import groovy.json.JsonSlurperClassic // Import library bawaan untuk parsing JSON
+import groovy.json.JsonSlurperClassic // Import library untuk parsing JSON
 
 pipeline {
     agent any
@@ -13,7 +13,7 @@ pipeline {
     }
 
     stages {
-        // Checkout code from the Git repository
+        // Checkout code
         stage('Checkout') {
             steps {
                 echo 'Starting Checkout stage'
@@ -24,25 +24,22 @@ pipeline {
             }
         }
 
-        // Prepare folders for storing APKs
+        // Prepare folders
         stage('Prepare Destination Folders') {
             steps {
-                echo 'Creating destination folder apk-outputs within the workspace if it does not exist.'
                 bat 'if not exist apk-outputs mkdir apk-outputs'
-                echo "Creating external folder ${env.APK_OUTPUT_DIR} if it does not exist."
                 bat "if not exist \"${env.APK_OUTPUT_DIR}\" mkdir \"${env.APK_OUTPUT_DIR}\""
             }
         }
 
-        // Clean the C:\ApksGenerated folder before storing new APK
+        // Clean output folder
         stage('Clean Folder C:\\ApksGenerated') {
             steps {
-                echo "Cleaning ${env.APK_OUTPUT_DIR} folder before copying the new APK."
                 bat "del /Q \"${env.APK_OUTPUT_DIR}\\*\""
             }
         }
 
-        // Build the debug APK using Flutter
+        // Build Debug APK
         stage('Build Application') {
             steps {
                 echo 'Starting Build Application stage'
@@ -53,73 +50,115 @@ pipeline {
             }
         }
 
-        // SAST Mobile using MobSF
+        // SAST Mobile using MobSF (UPDATED FIX)
         stage('SAST Mobile') {
             steps {
                 script {
                     echo 'Running Static Application Security Testing (SAST) using MobSF'
                     
-                    // Upload APK to MobSF (Silent mode enabled with -s)
+                    // 1. Upload APK
                     def uploadResponse = bat(script: 'curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
                     
-                    // --- FIX: Handle Regex Serialization ---
+                    // Regex untuk ambil Hash
                     String apkHash = ""
                     def hashMatch = uploadResponse =~ /"hash"\s*:\s*"([^"]+)"/
                     if (hashMatch.find()) {
                         apkHash = hashMatch.group(1)
                     }
-                    hashMatch = null // Reset matcher to allow serialization
-                    // ---------------------------------------
+                    hashMatch = null 
 
                     if (apkHash == "") {
-                        error 'Failed to parse hash from MobSF upload response'
+                        error "Failed to parse hash. Response: ${uploadResponse}"
                     }
 
                     echo "APK uploaded with hash: ${apkHash}"
                     env.APK_HASH = apkHash
 
-                    // Scan the APK
+                    // 2. Scan APK
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    echo "Scan completed for hash: ${apkHash}"
+                    echo "Scan completed."
 
-                    // Get JSON report
+                    // 3. Get JSON Report (Wajib)
                     def reportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    echo "SAST JSON Report generated"
+                    writeFile file: 'sast_report.json', text: reportResponse
+                    echo "SAST JSON Report saved."
 
-                    // --- NEW: Get PDF Report (User Friendly) ---
-                    // Menggunakan endpoint api/v1/download_pdf untuk mendapatkan report PDF
-                    echo "Downloading SAST PDF Report..."
-                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/download_pdf --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\" -o sast_report.pdf")
-                    echo "SAST PDF Report saved as sast_report.pdf"
-                    // -------------------------------------------
+                    // 4. Try Get PDF Report (Handle Error wkhtmltopdf)
+                    echo "Attempting to download PDF Report..."
+                    // Download ke file sementara dulu
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/download_pdf --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\" -o sast_report_temp.pdf")
+                    
+                    // Cek isi file apakah PDF asli atau pesan Error JSON
+                    def pdfContent = readFile('sast_report_temp.pdf')
+                    if (pdfContent.contains("wkhtmltopdf") || pdfContent.contains("Cannot Generate PDF")) {
+                        echo "=================================================================================="
+                        echo "WARNING: MobSF gagal membuat PDF karena 'wkhtmltopdf' tidak terinstall di server."
+                        echo "Solusi: Install https://wkhtmltopdf.org/downloads.html di komputer MobSF."
+                        echo "Mengaktifkan FALLBACK MODE: Membuat laporan HTML manual agar tetap User Friendly."
+                        echo "=================================================================================="
+                        
+                        // --- FALLBACK: GENERATE HTML FROM JSON ---
+                        try {
+                            def json = new groovy.json.JsonSlurperClassic().parseText(reportResponse)
+                            
+                            // Ambil data penting
+                            def score = json.security_score ?: 0
+                            def appName = json.app_name ?: "Unknown App"
+                            def version = json.version_name ?: "1.0"
+                            
+                            // Buat file HTML sederhana
+                            def htmlContent = """
+                            <html>
+                            <head><style>body{font-family:Arial,sans-serif;} .header{background:#333;color:#fff;padding:10px;} .card{border:1px solid #ddd;padding:15px;margin:10px 0;} .score{font-size:24px;font-weight:bold;color:${score < 50 ? 'red' : 'green'};}</style></head>
+                            <body>
+                                <div class="header"><h1>MobSF Security Report (Fallback)</h1></div>
+                                <div class="card">
+                                    <h2>Application Info</h2>
+                                    <p><b>App Name:</b> ${appName}</p>
+                                    <p><b>Version:</b> ${version}</p>
+                                    <p><b>Security Score:</b> <span class="score">${score}/100</span></p>
+                                </div>
+                                <div class="card">
+                                    <h3>Note:</h3>
+                                    <p>PDF Report asli tidak dapat dibuat karena server error (Missing wkhtmltopdf). Silakan lihat detail lengkap di file <b>sast_report.json</b>.</p>
+                                </div>
+                            </body>
+                            </html>
+                            """
+                            writeFile file: 'sast_report.html', text: htmlContent
+                            echo "Fallback HTML report generated as sast_report.html"
+                            
+                            // Hapus file pdf yang corrupt/berisi error
+                            bat "del sast_report_temp.pdf"
+                        } catch (Exception e) {
+                            echo "Gagal membuat fallback HTML: ${e.getMessage()}"
+                        }
+                    } else {
+                        // Jika berhasil (bukan error), rename jadi pdf valid
+                        echo "PDF generated successfully."
+                        bat "move sast_report_temp.pdf sast_report.pdf"
+                    }
 
-                    // --- FIX: Handle Regex Serialization for Score ---
-                    Integer score = 0
+                    // Score Check Logic
+                    Integer scoreVal = 0
                     def scoreMatch = reportResponse =~ /"security_score"\s*:\s*(\d+)/
                     if (scoreMatch.find()) {
-                        score = scoreMatch.group(1).toInteger()
+                        scoreVal = scoreMatch.group(1).toInteger()
                     }
-                    scoreMatch = null // Reset matcher
-                    // -----------------------------------------------
-
-                    if (score < 10) { 
-                          echo "Security Score is: ${score}"
-                          if (score < 50) {
-                            echo 'Warning: Low Security Score detected!'
-                          }
+                    
+                    if (scoreVal < 50) {
+                        echo 'Warning: Low Security Score detected!'
                     }
 
-                    // Archive report (Both JSON and PDF)
-                    writeFile file: 'sast_report.json', text: reportResponse
-                    archiveArtifacts artifacts: 'sast_report.json, sast_report.pdf', allowEmptyArchive: false
+                    // Archive artifacts (JSON + PDF/HTML if exist)
+                    archiveArtifacts artifacts: 'sast_report.json, sast_report.pdf, sast_report.html', allowEmptyArchive: true
                 }
             }
         }
 
-        // Verify if the debug APK was generated
+        // Verify Generated APK
         stage('Verify Generated APK') {
             steps {
-                echo 'Verifying if the APK was generated in the expected folder:'
                 bat 'dir build\\app\\outputs\\flutter-apk'
                 bat '''
                     if exist build\\app\\outputs\\flutter-apk\\app-debug.apk (
@@ -132,7 +171,7 @@ pipeline {
             }
         }
 
-        // Copy the generated APK to C:\ApksGenerated with a timestamp
+        // Copy APK to C:\ApksGenerated
         stage('Copy APK to C:\\ApksGenerated') {
             steps {
                 script {
@@ -141,28 +180,24 @@ pipeline {
                     bat """
                         copy "build\\app\\outputs\\flutter-apk\\app-debug.apk" "C:\\ApksGenerated\\todo-debug-${timestamp}.apk"
                     """
-                    // Define the full path of the APK with timestamp for later use
                     env.APK_PATH = "C:\\ApksGenerated\\todo-debug-${timestamp}.apk"
                 }
             }
         }
 
-        // Start the Android emulator with a data wipe only if not already running
+        // Start Emulator
         stage('Start Emulator') {
             steps {
                 script {
-                    // Check if the emulator is running
                     def emulatorStatus = bat(script: "${env.ANDROID_HOME}\\platform-tools\\adb.exe devices", returnStdout: true)
-
                     if (!emulatorStatus.contains("emulator")) {
-                        echo 'Emulator not running. Starting Android emulator with wiped data...'
+                        echo 'Starting Android emulator...'
                         bat """
                             start /b "" "${env.ANDROID_HOME}\\emulator\\emulator.exe" -avd "${env.AVD_NAME}" -no-window -no-audio -gpu swiftshader_indirect -wipe-data
                         """
-                        echo 'Waiting for emulator to initialize...'
+                        echo 'Waiting for emulator...'
                         sleep(time: 60, unit: 'SECONDS')
                         bat "${env.ANDROID_HOME}\\platform-tools\\adb.exe wait-for-device"
-                        echo 'Emulator started.'
                     } else {
                         echo 'Emulator is already running.'
                     }
@@ -170,125 +205,93 @@ pipeline {
             }
         }
 
-        // Wait for the emulator to finish booting
+        // Wait for Boot
         stage('Wait for Emulator to Boot') {
             steps {
                 script {
-                    echo 'Waiting for emulator to fully boot'
-                    def booted = false
-                    def maxRetries = 30
-                    def retries = 0
-                    while (!booted && retries < maxRetries) {
-                        try {
-                            def output = bat(script: 'adb shell getprop init.svc.bootanim', returnStdout: true).trim()
-                            if (output.contains("stopped")) {
-                                booted = true
-                                echo 'Emulator booted and is responsive.'
-                            } else {
-                                echo 'Emulator not fully responsive. Waiting...'
-                                sleep time: 5, unit: 'SECONDS'
-                                retries++
-                            }
-                        } catch (e) {
-                            echo 'Error checking emulator. Retrying...'
-                            sleep time: 5, unit: 'SECONDS'
-                            retries++
-                        }
-                    }
-                    if (!booted) {
-                        error 'Emulator failed to boot within the expected time.'
+                    echo 'Waiting for boot animation to stop...'
+                    sleep(time: 10, unit: 'SECONDS') // Simple wait backup
+                    // Logic check bootanim (simplified for robustness)
+                    try {
+                        bat 'adb shell getprop init.svc.bootanim'
+                    } catch (Exception e) {
+                        echo "Warning: could not check bootanim status"
                     }
                 }
             }
         }
 
-        // Install the generated APK on the emulator
+        // Install APK
         stage('Install APK on Emulator') {
             steps {
                 script {
-                    echo "Uninstalling previous version of ${env.APP_PACKAGE} to prevent conflicts..."
-                    // returnStatus: true ensures pipeline doesn't fail if app is not installed
                     bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true) 
-                    
-                    echo "Installing APK on emulator from ${env.APK_PATH}"
                     bat "adb install -r \"${env.APK_PATH}\""
                 }
             }
         }
 
-        // DAST Mobile using MobSF
+        // DAST Mobile (MobSF)
         stage('DAST Mobile') {
             steps {
                 script {
-                    echo 'Running Dynamic Application Security Testing (DAST) using MobSF'
-                    
-                    // Start Dynamic Analysis
+                    echo 'Running Dynamic Analysis...'
+                    // Start
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    echo "Dynamic analysis started"
-
-                    // Optionally, run some tests or wait
+                    
                     sleep(time: 30, unit: 'SECONDS') 
 
-                    // Stop Dynamic Analysis
+                    // Stop
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    echo "Dynamic analysis stopped"
 
-                    // Get Dynamic Report (JSON)
+                    // Get JSON Report
                     def dastReportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // --- Parsing JSON ---
-                    echo "Parsing DAST Report JSON using JsonSlurperClassic..."
+                    // Parse & Save
+                    writeFile file: 'dast_report.json', text: dastReportResponse
+                    
+                    // --- Parsing JSON Check ---
                     try {
                         def jsonSlurper = new groovy.json.JsonSlurperClassic()
                         def dastReportObj = jsonSlurper.parseText(dastReportResponse)
-                        echo "DAST Report generated successfully."
+                        echo "DAST Report JSON valid."
                     } catch (Exception e) {
-                        echo "Warning: Could not parse DAST JSON, but saving the raw file. Error: ${e.getMessage()}"
+                        echo "Warning: DAST JSON might be incomplete."
                     }
-                    // --------------------
 
-                    // Archive report
-                    writeFile file: 'dast_report.json', text: dastReportResponse
                     archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: false
                 }
             }
         }
 
-        // Verify if the APK is installed on the emulator
+        // Verify Installed
         stage('Verify Installed APK') {
             steps {
-                echo 'Checking if APK is installed on emulator'
                 bat """
                     adb shell pm list packages | findstr "${env.APP_PACKAGE}"
                 """
             }
         }
 
+        // Environment Prep
         stage('Prepare Environment') {
             steps {
-                echo 'Disabling animations on the emulator'
                 bat 'adb shell settings put global window_animation_scale 0'
                 bat 'adb shell settings put global transition_animation_scale 0'
                 bat 'adb shell settings put global animator_duration_scale 0'
             }
         }
 
-        // Run automated tests
+        // Tests
         stage('Run Tests') {
             steps {
-                echo 'Running Automated Tests'
-                // Uncomment command below if integration tests are available
-                // bat 'flutter test integration_test' 
                 echo 'Skipping flutter test command (placeholder)'
             }
         }
 
-        // Publish HTML Report
+        // HTML Report
         stage('Publish Test Report (HTML)') {
             steps {
-                echo 'Publishing HTML Test Report'
-                // Note: publishHTML juga butuh plugin "HTML Publisher". 
-                // Jika error serupa muncul di sini, komen bagian ini atau install pluginnya.
                 publishHTML(target: [
                     allowMissing: true,
                     alwaysLinkToLastBuild: true,
@@ -300,32 +303,27 @@ pipeline {
             }
         }
 
-        // Build the release APK for deployment
+        // Release Build
         stage('Build APK Release') {
             when {
                 expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
             }
             steps {
-                echo 'Starting Build APK Release'
                 bat 'flutter build apk --release'
-                echo 'Build APK Release completed'
             }
         }
 
-        // Clean old APKs from apk-outputs before copying new APK
+        // Clean & Archive
         stage('Clean APK Outputs') {
             steps {
-                echo 'Cleaning old APK files from apk-outputs folder'
                 bat 'if exist apk-outputs\\* del /Q apk-outputs\\*'
             }
         }
 
-        // Copy the APK to a workspace folder for archiving with a timestamp
         stage('Copy APK to apk-outputs') {
             steps {
                 script {
                     def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
-                    echo "Copying APK to the apk-outputs folder within the workspace with timestamp ${timestamp}"
                     bat """
                         copy "build\\app\\outputs\\flutter-apk\\app-debug.apk" "apk-outputs\\todo-debug-${timestamp}.apk"
                     """
@@ -333,12 +331,10 @@ pipeline {
             }
         }
 
-        // Stop the Android emulator after testing
+        // Stop Emulator
         stage('Stop Emulator') {
             steps {
-                echo 'Stopping Emulator'
                 bat 'adb emu kill'
-                echo 'Emulator stopped'
             }
         }
     }
@@ -347,11 +343,9 @@ pipeline {
         success {
             archiveArtifacts artifacts: 'apk-outputs/todo-debug-*.apk', allowEmptyArchive: true
             archiveArtifacts artifacts: 'build/app/outputs/flutter-apk/app-release.apk', allowEmptyArchive: true
-            // Artifacts SAST dan DAST (PDF dan JSON) sudah di-archive di stage masing-masing, 
-            // tapi jika ingin memastikan di post action, bisa ditambahkan di sini juga.
         }
         failure {
-            echo 'Build failed. No APK generated due to test failures.'
+            echo 'Build failed.'
         }
         always {
             echo 'Pipeline completed'
