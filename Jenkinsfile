@@ -57,18 +57,17 @@ pipeline {
                 script {
                     echo 'Running Static Application Security Testing (SAST) using MobSF'
                     
-                    // Upload APK to MobSF (Added -s for silent to avoid progress bar in output)
+                    // Upload APK to MobSF (Silent mode enabled with -s)
                     def uploadResponse = bat(script: 'curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
                     
-                    // --- FIX START: Handle Regex Serialization ---
+                    // --- FIX: Handle Regex Serialization ---
                     String apkHash = ""
                     def hashMatch = uploadResponse =~ /"hash"\s*:\s*"([^"]+)"/
                     if (hashMatch.find()) {
                         apkHash = hashMatch.group(1)
                     }
-                    // PENTING: Hapus objek matcher agar Jenkins bisa melakukan serialisasi
-                    hashMatch = null 
-                    // --- FIX END ---
+                    hashMatch = null // Reset matcher to allow serialization
+                    // ---------------------------------------
 
                     if (apkHash == "") {
                         error 'Failed to parse hash from MobSF upload response'
@@ -77,29 +76,26 @@ pipeline {
                     echo "APK uploaded with hash: ${apkHash}"
                     env.APK_HASH = apkHash
 
-                    // Scan the APK (Added -s)
-                    def scanResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    // Scan the APK
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     echo "Scan completed for hash: ${apkHash}"
 
-                    // Get JSON report (Added -s)
+                    // Get JSON report
                     def reportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     echo "SAST Report generated"
 
-                    // --- FIX START: Handle Regex Serialization for Score ---
+                    // --- FIX: Handle Regex Serialization for Score ---
                     Integer score = 0
                     def scoreMatch = reportResponse =~ /"security_score"\s*:\s*(\d+)/
                     if (scoreMatch.find()) {
                         score = scoreMatch.group(1).toInteger()
                     }
-                    // PENTING: Hapus objek matcher lagi
-                    scoreMatch = null
-                    // --- FIX END ---
+                    scoreMatch = null // Reset matcher
+                    // -----------------------------------------------
 
-                    if (score < 10) { // Adjusted logic check, ensure variable exists
+                    if (score < 10) { 
                          echo "Security Score is: ${score}"
                          if (score < 50) {
-                            // error 'SAST found high-risk vulnerabilities. Pipeline failed.' 
-                            // Uncomment line above if you want to block build on low score
                             echo 'Warning: Low Security Score detected!'
                          }
                     }
@@ -151,12 +147,10 @@ pipeline {
 
                     if (!emulatorStatus.contains("emulator")) {
                         echo 'Emulator not running. Starting Android emulator with wiped data...'
-                        // Menggunakan start /b agar tidak memblokir command line
                         bat """
                             start /b "" "${env.ANDROID_HOME}\\emulator\\emulator.exe" -avd "${env.AVD_NAME}" -no-window -no-audio -gpu swiftshader_indirect -wipe-data
                         """
                         echo 'Waiting for emulator to initialize...'
-                        // Wait for a while to ensure the emulator initializes completely
                         sleep(time: 60, unit: 'SECONDS')
                         bat "${env.ANDROID_HOME}\\platform-tools\\adb.exe wait-for-device"
                         echo 'Emulator started.'
@@ -199,11 +193,17 @@ pipeline {
             }
         }
 
-        // Install the generated APK on the emulator
+        // Install the generated APK on the emulator (FIXED: Added Uninstall step)
         stage('Install APK on Emulator') {
             steps {
-                echo "Installing APK on emulator from ${env.APK_PATH}"
-                bat "adb install -r \"${env.APK_PATH}\""
+                script {
+                    echo "Uninstalling previous version of ${env.APP_PACKAGE} to prevent conflicts..."
+                    // returnStatus: true ensures pipeline doesn't fail if app is not installed
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true) 
+                    
+                    echo "Installing APK on emulator from ${env.APK_PATH}"
+                    bat "adb install -r \"${env.APK_PATH}\""
+                }
             }
         }
 
@@ -214,11 +214,11 @@ pipeline {
                     echo 'Running Dynamic Application Security Testing (DAST) using MobSF'
                     
                     // Start Dynamic Analysis
-                    def startResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     echo "Dynamic analysis started"
 
                     // Optionally, run some tests or wait
-                    sleep(time: 30, unit: 'SECONDS')  // Simulate running app and tests
+                    sleep(time: 30, unit: 'SECONDS') 
 
                     // Stop Dynamic Analysis
                     bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
@@ -227,7 +227,7 @@ pipeline {
                     // Get Dynamic Report
                     def dastReportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // Gunakan readJSON untuk parsing yang aman dari error serialisasi
+                    // Using readJSON to avoid regex serialization issues on large JSON
                     def dastReportJson = readJSON text: dastReportResponse
                     echo "DAST Report generated"
 
@@ -261,9 +261,9 @@ pipeline {
         stage('Run Tests') {
             steps {
                 echo 'Running Automated Tests'
-                // Pastikan folder integration_test ada, atau ubah perintah ini sesuai struktur project Anda
+                // Uncomment command below if integration tests are available
                 // bat 'flutter test integration_test' 
-                echo 'Skipping flutter test command for now (uncomment if integration tests exist)'
+                echo 'Skipping flutter test command (placeholder)'
             }
         }
 
@@ -271,7 +271,6 @@ pipeline {
         stage('Publish Test Report (HTML)') {
             steps {
                 echo 'Publishing HTML Test Report'
-                // Pastikan plugin HTML Publisher terinstall di Jenkins
                 publishHTML(target: [
                     allowMissing: true,
                     alwaysLinkToLastBuild: true,
