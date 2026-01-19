@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'add_todo_page.dart';
+import 'user_settings_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -12,33 +14,16 @@ class Task {
   Task({required this.id, required this.title, this.isCompleted = false});
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'To-Do List',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF00008A)),
-      ),
-      home: const MyHomePage(title: 'To-Do List'),
-    );
-  }
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
+class _MainScreenState extends State<MainScreen> {
+  int _selectedIndex = 0;
   final List<Task> _tasks = [];
-  final TextEditingController _controller = TextEditingController();
 
   void _addTask(String title) {
     setState(() {
@@ -47,7 +32,6 @@ class _MyHomePageState extends State<MyHomePage> {
         title: title,
       ));
     });
-    _controller.clear();
   }
 
   void _updateTask(String id, String newTitle) {
@@ -70,7 +54,134 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void _showAddDialog() {
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> _widgetOptions = <Widget>[
+      MyHomePage(
+        tasks: _tasks,
+        onAddTask: _addTask,
+        onUpdateTask: _updateTask,
+        onDeleteTask: _deleteTask,
+        onToggleTask: _toggleTask,
+      ),
+      AddTodoPage(onAddTask: _addTask),
+      const UserSettingsPage(),
+    ];
+
+    return Scaffold(
+      body: _widgetOptions.elementAt(_selectedIndex),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.add),
+            label: 'Tambah To-Do',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: Colors.blue,
+        onTap: _onItemTapped,
+      ),
+    );
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'To-Do List',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF00008A)),
+      ),
+      home: const MainScreen(),
+    );
+  }
+}
+
+class MyHomePage extends StatelessWidget {
+  const MyHomePage({
+    super.key,
+    required this.tasks,
+    required this.onAddTask,
+    required this.onUpdateTask,
+    required this.onDeleteTask,
+    required this.onToggleTask,
+  });
+
+  final List<Task> tasks;
+  final Function(String) onAddTask;
+  final Function(String, String) onUpdateTask;
+  final Function(String) onDeleteTask;
+  final Function(String) onToggleTask;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: const Text('To-Do List'),
+      ),
+      body: tasks.isEmpty
+          ? const Center(child: Text('Belum ada tugas'))
+          : ListView.builder(
+              itemCount: tasks.length,
+              itemBuilder: (context, index) {
+                final task = tasks[index];
+                return ListTile(
+                  leading: Checkbox(
+                    value: task.isCompleted,
+                    onChanged: (value) => onToggleTask(task.id),
+                  ),
+                  title: Text(
+                    task.title,
+                    style: TextStyle(
+                      decoration: task.isCompleted
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        onPressed: () => _showEditDialog(context, task),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete),
+                        onPressed: () => onDeleteTask(task.id),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddDialog(context),
+        tooltip: 'Tambah Tugas',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  void _showAddDialog(BuildContext context) {
+    final TextEditingController _controller = TextEditingController();
     showDialog(
       context: context,
       builder: (context) {
@@ -88,7 +199,7 @@ class _MyHomePageState extends State<MyHomePage> {
             TextButton(
               onPressed: () {
                 if (_controller.text.isNotEmpty) {
-                  _addTask(_controller.text);
+                  onAddTask(_controller.text);
                   Navigator.of(context).pop();
                 }
               },
@@ -100,8 +211,8 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  void _showEditDialog(Task task) {
-    _controller.text = task.title;
+  void _showEditDialog(BuildContext context, Task task) {
+    final TextEditingController _controller = TextEditingController(text: task.title);
     showDialog(
       context: context,
       builder: (context) {
@@ -119,7 +230,7 @@ class _MyHomePageState extends State<MyHomePage> {
             TextButton(
               onPressed: () {
                 if (_controller.text.isNotEmpty) {
-                  _updateTask(task.id, _controller.text);
+                  onUpdateTask(task.id, _controller.text);
                   Navigator.of(context).pop();
                 }
               },
@@ -128,56 +239,6 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         );
       },
-    ).then((_) => _controller.clear());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
-      ),
-      body: _tasks.isEmpty
-          ? const Center(child: Text('Belum ada tugas'))
-          : ListView.builder(
-              itemCount: _tasks.length,
-              itemBuilder: (context, index) {
-                final task = _tasks[index];
-                return ListTile(
-                  leading: Checkbox(
-                    value: task.isCompleted,
-                    onChanged: (value) => _toggleTask(task.id),
-                  ),
-                  title: Text(
-                    task.title,
-                    style: TextStyle(
-                      decoration: task.isCompleted
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
-                    ),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit),
-                        onPressed: () => _showEditDialog(task),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () => _deleteTask(task.id),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddDialog,
-        tooltip: 'Tambah Tugas',
-        child: const Icon(Icons.add),
-      ),
     );
   }
 }
