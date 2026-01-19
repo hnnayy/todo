@@ -1,43 +1,19 @@
-import groovy.json.JsonSlurperClassic 
-
-// --- HELPER METHODS ---
-
-@NonCPS
-def extractHashFromResponse(String response) {
-    def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
-    if (matcher.find()) {
-        return matcher.group(1)
-    }
-    return ""
-}
-
-@NonCPS
-def cleanJsonString(String rawOutput) {
-    int firstBrace = rawOutput.indexOf('{')
-    int lastBrace = rawOutput.lastIndexOf('}')
-    if (firstBrace == -1 || lastBrace == -1) { return null }
-    return rawOutput.substring(firstBrace, lastBrace + 1)
-}
-
-// -----------------------------------------------------------------------
+import groovy.json.JsonSlurperClassic
 
 pipeline {
     agent any
-
-    // [MODIFIKASI] Menambahkan Parameter Pilihan
-    parameters {
-        choice(name: 'BUILD_TYPE', choices: ['release', 'debug'], description: 'Pilih Tipe Build (Gunakan Release untuk hasil audit yang akurat)')
-    }
 
     environment {
         ANDROID_HOME = "C:\\Users\\SECULAB\\AppData\\Local\\Android\\Sdk"
         PATH = "${env.ANDROID_HOME}\\tools;${env.ANDROID_HOME}\\platform-tools;${env.PATH}"
         AVD_NAME = "Pixel_4_XL_2"
-        APP_PACKAGE = "com.example.mobileapp" 
+        GRADLE_USER_HOME = "${env.WORKSPACE}\\.gradle"
+        APP_PACKAGE = "com.example.mobileapp"
         APK_OUTPUT_DIR = "C:\\ApksGenerated"
     }
 
     stages {
+        // 1. Checkout Code
         stage('Checkout') {
             steps {
                 echo 'Starting Checkout stage'
@@ -47,176 +23,191 @@ pipeline {
             }
         }
 
+        // 2. Persiapan Folder
         stage('Prepare Folders') {
             steps {
                 bat 'if not exist apk-outputs mkdir apk-outputs'
                 bat "if not exist \"${env.APK_OUTPUT_DIR}\" mkdir \"${env.APK_OUTPUT_DIR}\""
-            }
-        }
-
-        stage('Clean Folder C:\\ApksGenerated') {
-            steps {
-                echo "Cleaning ${env.APK_OUTPUT_DIR} folder."
+                // Bersihkan folder output eksternal
                 bat "del /Q \"${env.APK_OUTPUT_DIR}\\*\""
             }
         }
 
+        // 3. Build APK Debug
         stage('Build Application') {
             steps {
-                echo "Starting Build Application stage (Mode: ${params.BUILD_TYPE})"
+                echo 'Building Flutter APK...'
                 bat 'git config --global --add safe.directory C:/flutter'
                 bat 'flutter pub get'
-                // [MODIFIKASI] Command build dinamis sesuai parameter
-                bat "flutter build apk --${params.BUILD_TYPE}"
+                bat 'flutter build apk --debug'
             }
         }
 
-        // --- SAST STAGE ---
+        // 4. SAST Mobile (Static Analysis)
         stage('SAST Mobile') {
             steps {
                 script {
-                    echo 'Running SAST...'
+                    echo 'Running SAST (Static Analysis)...'
                     
-                    // [MODIFIKASI] Path file dinamis (app-release.apk atau app-debug.apk)
-                    def apkSourcePath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
+                    // Upload APK ke MobSF
+                    def uploadResponse = bat(script: 'curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"', returnStdout: true).trim()
                     
-                    // Upload ke MobSF
-                    def uploadResponse = bat(script: "@curl -s -F \"file=@${apkSourcePath}\" http://localhost:8000/api/v1/upload -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    String apkHash = extractHashFromResponse(uploadResponse)
-                    
-                    if (apkHash == "") { error "Upload failed." }
+                    // Parsing JSON Response untuk ambil HASH
+                    def jsonSlurper = new JsonSlurperClassic()
+                    def uploadJson = jsonSlurper.parseText(uploadResponse)
+                    String apkHash = uploadJson.hash
+
+                    if (!apkHash) {
+                        error 'Gagal mendapatkan Hash dari MobSF. Cek koneksi atau file APK.'
+                    }
+
+                    echo "APK Hash: ${apkHash}"
                     env.APK_HASH = apkHash
-                    echo "SAST Hash: ${apkHash}"
 
-                    // Scan
-                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    // Trigger Scan
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // Get Report
-                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-
-                    String jsonString = cleanJsonString(rawOutput)
-                    if (jsonString != null) {
-                        writeFile file: 'sast_report.json', text: jsonString
-                        echo "SAST JSON Report saved."
-                        echo "✅ SAST Report URL: http://localhost:8000/static_analyzer/${apkHash}/"
+                    // Ambil Report JSON
+                    def reportResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
+                    // Cek Security Score
+                    try {
+                        def reportJson = jsonSlurper.parseText(reportResponse)
+                        def score = reportJson.security_score
+                        echo "Security Score: ${score}/100"
+                        
+                        if (score < 50) {
+                            echo "WARNING: Skor keamanan rendah!"
+                        }
+                    } catch (Exception e) {
+                        echo "Info: Tidak bisa membaca skor otomatis (format JSON mungkin berbeda), tapi report tetap disimpan."
                     }
-                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: true
+
+                    // Simpan Report
+                    writeFile file: 'sast_report.json', text: reportResponse
+                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: false
                 }
             }
         }
 
-        stage('Setup Emulator') {
-            steps {
-                script {
-                    def devices = bat(script: "adb devices", returnStdout: true)
-                    if (!devices.contains("emulator")) {
-                        // [PENTING] -gpu swiftshader_indirect mencegah crash pada Flutter Impeller
-                        echo "Starting emulator with software rendering to prevent Impeller crash..."
-                        bat "start /b \"\" \"${env.ANDROID_HOME}\\emulator\\emulator.exe\" -avd \"${env.AVD_NAME}\" -no-window -no-audio -gpu swiftshader_indirect -wipe-data"
-                        sleep(time: 60, unit: 'SECONDS')
-                        bat "adb wait-for-device"
-                    }
-                    sleep(time: 15, unit: 'SECONDS')
-                }
-            }
-        }
-
-        stage('Install APK') {
+        // 5. Copy APK ke Folder Luar
+        stage('Backup APK') {
             steps {
                 script {
                     def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
-                    
-                    // [MODIFIKASI] Copy file yang benar (Release/Debug)
-                    def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
-                    def destPath = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
-                    
-                    echo "Copying APK from ${sourcePath} to ${destPath}"
-                    bat "copy \"${sourcePath}\" \"${destPath}\""
-                    
-                    env.APK_PATH = destPath
-                    
-                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true) 
-                    bat "adb install -r \"${env.APK_PATH}\""
+                    def targetPath = "C:\\ApksGenerated\\todo-debug-${timestamp}.apk"
+                    bat "copy \"build\\app\\outputs\\flutter-apk\\app-debug.apk\" \"${targetPath}\""
+                    env.APK_PATH = targetPath
                 }
             }
         }
 
-        // --- DAST STAGE (HEAVY DUTY) ---
+        // 6. Start Emulator (RAM Ditingkatkan)
+        stage('Start Emulator') {
+            steps {
+                script {
+                    def devices = bat(script: "${env.ANDROID_HOME}\\platform-tools\\adb.exe devices", returnStdout: true)
+                    if (!devices.contains("emulator")) {
+                        echo 'Starting Emulator with 2GB RAM to prevent Lag...'
+                        // PERBAIKAN: Menambah -memory 2048
+                        bat """
+                            start /b "" "${env.ANDROID_HOME}\\emulator\\emulator.exe" -avd "${env.AVD_NAME}" -no-window -no-audio -gpu swiftshader_indirect -wipe-data -memory 2048
+                        """
+                        echo 'Waiting for emulator startup (60s)...'
+                        sleep(time: 60, unit: 'SECONDS')
+                        bat "${env.ANDROID_HOME}\\platform-tools\\adb.exe wait-for-device"
+                    } else {
+                        echo 'Emulator already running.'
+                    }
+                }
+            }
+        }
+
+        // 7. Tunggu Booting Selesai
+        stage('Wait for Boot') {
+            steps {
+                script {
+                    echo 'Checking boot animation status...'
+                    def booted = false
+                    for (int i = 0; i < 20; i++) { // Coba 20 kali saja (sekali jalan loop)
+                        try {
+                            def out = bat(script: 'adb shell getprop init.svc.bootanim', returnStdout: true).trim()
+                            if (out.contains("stopped")) {
+                                booted = true
+                                break
+                            }
+                        } catch (e) {}
+                        sleep(5)
+                    }
+                    if (!booted) echo "Warning: Emulator might not be fully ready, but proceeding..."
+                }
+            }
+        }
+
+        // 8. Install & Prepare DAST
+        stage('Install & Warmup') {
+            steps {
+                script {
+                    echo "Uninstalling old app..."
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
+                    
+                    echo "Installing new APK..."
+                    bat "adb install -r \"${env.APK_PATH}\""
+
+                    // PERBAIKAN PENTING: Istirahat panjang agar Emulator tidak ANR
+                    echo "Waiting 60 seconds for App/Emulator to settle before DAST..."
+                    sleep(time: 60, unit: 'SECONDS')
+                }
+            }
+        }
+
+        // 9. DAST Mobile (Dynamic Analysis)
         stage('DAST Mobile') {
             steps {
                 script {
-                    echo 'Running DAST with Advanced Instrumentation...'
+                    echo 'Starting Dynamic Analysis...'
                     
-                    // 1. Force Screen UNLOCK (Mengatasi Injection Failed)
-                    echo "Unlocking screen..."
-                    bat "adb shell input keyevent 82" 
-                    sleep(time: 2, unit: 'SECONDS')
-                    bat "adb shell input keyevent 4" 
+                    // Start
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // 2. START Analysis
-                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    
-                    echo "Waiting 25s for App Launch..."
-                    sleep(time: 25, unit: 'SECONDS') 
+                    // Biarkan test berjalan
+                    echo "Running Analysis (30s)..."
+                    sleep(time: 30, unit: 'SECONDS')
 
-                    // 3. ENABLE FRIDA
-                    echo "Injecting Frida Hooks..."
-                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/instrument --data \"hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass&auxiliary_hooks=&frida_code=\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true)
+                    // Stop
+                    bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    sleep(time: 5, unit: 'SECONDS')
-
-                    // 4. INTERACTION PHASE
-                    echo "Starting Hybrid Interaction..."
-
-                    // A. Logical Input
+                    // Get Report
+                    def dastResponse = bat(script: "curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
+                    // Validasi JSON Sederhana
                     try {
-                        bat "adb shell input keyevent 61" // Tab
-                        bat "adb shell input text \"TEST\"" 
-                        bat "adb shell input keyevent 66" // Enter
-                    } catch (Exception e) { echo "Input skipped" }
-
-                    // B. Monkey Testing
-                    echo "Running Monkey..."
-                    try {
-                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 300 -v 1000"
-                    } catch (Exception e) {
-                        echo "Monkey finished."
+                        new JsonSlurperClassic().parseText(dastResponse)
+                        echo "DAST Report valid JSON."
+                    } catch (e) {
+                        echo "Warning: DAST Report might be incomplete."
                     }
 
-                    sleep(time: 15, unit: 'SECONDS') 
-
-                    // 5. STOP Analysis
-                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-
-                    // 6. Get JSON Report
-                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-
-                    String jsonString = cleanJsonString(rawOutput)
-                    
-                    if (jsonString != null) {
-                        writeFile file: 'dast_report.json', text: jsonString
-                        echo "DAST JSON Report saved successfully."
-                        echo "✅ DAST Report URL: http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/"
-                    } else {
-                        echo "WARNING: Failed to extract JSON from DAST output."
-                        writeFile file: 'dast_raw.txt', text: rawOutput
-                    }
-
-                    archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: true
+                    writeFile file: 'dast_report.json', text: dastResponse
+                    archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: false
                 }
             }
         }
 
-        stage('Cleanup') {
+        // 10. Matikan Emulator
+        stage('Stop Emulator') {
             steps {
-                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
+                bat 'adb emu kill'
             }
         }
     }
 
     post {
-        always {
+        success {
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+        }
+        always {
+            echo 'Pipeline Finished.'
         }
     }
 }
