@@ -218,6 +218,22 @@ pipeline {
     post {
         always {
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+
+            // [MODIFIKASI] Mengirim Email dengan Lampiran Report & Link ke SAST/DAST
+            emailext (
+                subject: "Laporan Security Scan Mobile App: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
+                body: """<p>Build Selesai. Berikut detail laporan scan keamanan:</p>
+                         <p><strong>Status Build:</strong> ${currentBuild.currentResult}</p>
+                         <hr>
+                         <p><strong>🔗 Link Laporan MobSF (Localhost):</strong></p>
+                         <ul>
+                            <li><strong>SAST Report (Static):</strong> <a href="http://localhost:8000/static_analyzer/${env.APK_HASH}/">Lihat Laporan SAST</a></li>
+                            <li><strong>DAST Report (Dynamic):</strong> <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Lihat Laporan DAST</a></li>
+                         </ul>
+                         <p><em>File JSON lengkap untuk laporan SAST dan DAST telah dilampirkan pada email ini.</em></p>""",
+                to: "mutiahanin2017@gmail.com, gghurl111@gmail.com",
+                attachmentsPattern: "**/*.json"
+            )
         }
     }
 }
