@@ -178,7 +178,8 @@ pipeline {
                     // B. Monkey Testing
                     echo "Running Monkey..."
                     try {
-                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 300 -v 1000"
+                        // [Solusi Sementara] Throttle diubah menjadi 1000 agar memberi waktu napas untuk aplikasi (sebelumnya 300)
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 1000 -v 1000"
                     } catch (Exception e) {
                         echo "Monkey finished."
                     }
