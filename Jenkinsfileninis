@@ -54,17 +54,17 @@ pipeline {
             steps {
                 script {
                     def upload = bat(
-                        script: '@curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"',
+                        script: '@curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"',
                         returnStdout: true
                     ).trim()
 
                     env.APK_HASH = extractHashFromResponse(upload)
                     if (!env.APK_HASH) { error "SAST upload failed" }
 
-                    bat "@curl -s -X POST http://localhost:8000/api/v1/scan --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\""
+                    bat "@curl -s -X POST http://localhost:8000/api/v1/scan --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\""
 
                     def report = bat(
-                        script: "@curl -s -X POST http://localhost:8000/api/v1/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"",
+                        script: "@curl -s -X POST http://localhost:8000/api/v1/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\"",
                         returnStdout: true
                     )
 
@@ -93,10 +93,10 @@ pipeline {
         stage('DAST Mobile') {
             steps {
                 bat "adb shell input keyevent 82"
-                bat "@curl -X POST http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\""
+                bat "@curl -X POST http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\""
                 sleep 30
                 bat "adb shell monkey -p ${APP_PACKAGE} --throttle 300 -v 500"
-                bat "@curl -X POST http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\""
+                bat "@curl -X POST http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\""
             }
         }
     }
