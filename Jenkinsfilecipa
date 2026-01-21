@@ -121,7 +121,7 @@ stage('Build Application') {
             def uploadResponse = bat(
                 script: """
                 curl -X POST ^
-                -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac" ^
+                -H "Authorization: 8e2a73a972044f782981594b2eefdf86e13e08745853097432943c9bcccd2a52" ^
                 -F "file=@${apkPath}" ^
                 http://localhost:8000/api/v1/upload
                 """,
@@ -142,7 +142,7 @@ stage('Build Application') {
             // === SCAN ===
             bat """
             curl -X POST ^
-            -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac" ^
+            -H "Authorization:  8e2a73a972044f782981594b2eefdf86e13e08745853097432943c9bcccd2a52" ^
             --data "hash=${apkHash}" ^
             http://localhost:8000/api/v1/scan
             """
@@ -151,7 +151,7 @@ stage('Build Application') {
             def rawOutput = bat(
                 script: """
                 curl -X POST ^
-                -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac" ^
+                -H "Authorization: 8e2a73a972044f782981594b2eefdf86e13e08745853097432943c9bcccd2a52" ^
                 --data "hash=${apkHash}" ^
                 http://localhost:8000/api/v1/report_json
                 """,
