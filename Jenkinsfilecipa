@@ -70,19 +70,20 @@ pipeline {
         }
 
         // ================= BUILD APK =================
-        stage('Build APK') {
-            steps {
-                echo 'Building Flutter APK'
-                bat '''
-                echo === CURRENT DIR ===
-                cd
-                dir pubspec.yaml
+stage('Build APK') {
+    steps {
+        echo 'Building Flutter APK'
+        bat '''
+        echo === CURRENT DIR ===
+        cd
+        dir pubspec.yaml
 
-                flutter pub get
-                flutter build apk --debug
-                '''
-            }
-        }
+        flutter pub get
+        flutter build apk --debug
+        '''
+    }
+}
+
 
         // ================= SAST =================
         stage('SAST Mobile') {
