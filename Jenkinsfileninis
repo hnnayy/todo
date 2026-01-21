@@ -117,26 +117,32 @@ pipeline {
                         -no-audio ^
                         -gpu swiftshader_indirect ^
                         -no-snapshot ^
-                        -no-boot-anim ^
-                        -wipe-data
+                        -no-boot-anim
                         '''
 
-                        echo "Waiting for emulator device..."
-                        bat "adb wait-for-device"
-
-                        echo "Waiting for boot completion..."
+                        echo "Waiting for emulator to fully boot..."
 
                         def booted = false
-                        for (int i = 0; i < 30; i++) {
-                            def bootStatus = bat(
+
+                        for (int i = 0; i < 40; i++) {
+
+                            def bootCompleted = bat(
                                 script: 'adb shell getprop sys.boot_completed',
                                 returnStdout: true
                             ).trim()
 
-                            if (bootStatus == '1') {
+                            def bootAnim = bat(
+                                script: 'adb shell getprop init.svc.bootanim',
+                                returnStdout: true
+                            ).trim()
+
+                            echo "boot_completed=${bootCompleted}, bootanim=${bootAnim}"
+
+                            if (bootCompleted == '1' || bootAnim == 'stopped') {
                                 booted = true
                                 break
                             }
+
                             sleep(time: 5, unit: 'SECONDS')
                         }
 
@@ -144,7 +150,11 @@ pipeline {
                             error "Emulator failed to boot in time"
                         }
 
-                        echo "Emulator fully booted"
+                        echo "Unlocking emulator screen..."
+                        bat "adb shell input keyevent 82"
+
+                        echo "Emulator fully ready"
+
                     }
                 }
             }
