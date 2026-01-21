@@ -114,7 +114,6 @@ pipeline {
                         -no-audio ^
                         -gpu swiftshader_indirect ^
                         -wipe-data ^
-                        -avd-home "%ANDROID_AVD_HOME%"
                         """
 
                         echo "Waiting emulator boot..."
