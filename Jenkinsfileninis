@@ -1,5 +1,7 @@
 import groovy.json.JsonSlurperClassic 
 
+// --- HELPER METHODS ---
+
 @NonCPS
 def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
@@ -17,11 +19,15 @@ def cleanJsonString(String rawOutput) {
     return rawOutput.substring(firstBrace, lastBrace + 1)
 }
 
+// -----------------------------------------------------------------------
+
 pipeline {
     agent any
     environment {
         ANDROID_HOME = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
         ANDROID_SDK_ROOT = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
+
+        // 🔥 FIX UTAMA AVD JENKINS
         ANDROID_AVD_HOME = "C:\\Users\\Nisrina\\.android\\avd"
         USER_HOME = "C:\\Users\\Nisrina"
 
@@ -30,8 +36,6 @@ pipeline {
         AVD_NAME = "Pixel_4_XL"
         APP_PACKAGE = "com.example.mobileapp"
         APK_OUTPUT_DIR = "C:\\ApksGenerated"
-
-        DEVICE_ID = "emulator-5554"   // 🔴 [UBAH 1] TAMBAH DEVICE ID
     }
 
     stages {
@@ -65,6 +69,7 @@ pipeline {
             }
         }
 
+        // --- SAST STAGE ---
         stage('SAST Mobile') {
             steps {
                 script {
@@ -95,35 +100,57 @@ pipeline {
             }
         }
 
+        // --- FIXED EMULATOR STAGE ---
         stage('Setup Emulator') {
             steps {
                 script {
-                    bat """
-                    adb kill-server
-                    adb start-server
-                    adb devices
+                    def devices = bat(script: "adb devices", returnStdout: true)
 
-                    start /b "" "%ANDROID_HOME%\\emulator\\emulator.exe" ^
-                    -avd %AVD_NAME% ^
-                    -no-window ^
-                    -no-audio ^
-                    -gpu swiftshader_indirect ^
-                    -no-snapshot ^
-                    -no-boot-anim
-                    """
+                    if (!devices.contains("emulator")) {
 
-                    bat """
-                    adb wait-for-device
-                    :waitloop
-                    adb shell getprop sys.boot_completed | findstr "1" >nul
-                    if errorlevel 1 (
-                        timeout /t 5 >nul
-                        goto waitloop
-                    )
-                    """
+                        echo "Starting Android Emulator in background..."
+
+                        bat '''
+                        cmd /c start "" "%ANDROID_HOME%\\emulator\\emulator.exe" ^
+                        -avd "%AVD_NAME%" ^
+                        -no-window ^
+                        -no-audio ^
+                        -gpu swiftshader_indirect ^
+                        -no-snapshot ^
+                        -no-boot-anim ^
+                        -wipe-data
+                        '''
+
+                        echo "Waiting for emulator device..."
+                        bat "adb wait-for-device"
+
+                        echo "Waiting for boot completion..."
+
+                        def booted = false
+                        for (int i = 0; i < 30; i++) {
+                            def bootStatus = bat(
+                                script: 'adb shell getprop sys.boot_completed',
+                                returnStdout: true
+                            ).trim()
+
+                            if (bootStatus == '1') {
+                                booted = true
+                                break
+                            }
+                            sleep(time: 5, unit: 'SECONDS')
+                        }
+
+                        if (!booted) {
+                            error "Emulator failed to boot in time"
+                        }
+
+                        echo "Emulator fully booted"
+                    }
                 }
             }
         }
+
+
 
         stage('Install APK') {
             steps {
@@ -138,36 +165,25 @@ pipeline {
             }
         }
 
+        // --- DAST STAGE ---
         stage('DAST Mobile') {
             steps {
                 script {
                     bat "adb shell input keyevent 82"
                     sleep(time: 2, unit: 'SECONDS')
 
-                    bat """
-                    @curl -s -X POST http://localhost:8000/api/v1/dynamic/start_analysis ^
-                    --data "hash=${env.APK_HASH}&device=${env.DEVICE_ID}" ^   // 🔴 [UBAH 2]
-                    -H "Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
-                    """
+                    bat "@curl -s -X POST http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\""
 
                     sleep(time: 25, unit: 'SECONDS')
 
-                    bat """
-                    @curl -s -X POST http://localhost:8000/api/v1/frida/instrument ^
-                    --data "hash=${env.APK_HASH}&device=${env.DEVICE_ID}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass" ^   // 🔴 [UBAH 3]
-                    -H "Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
-                    """
+                    bat "@curl -s -X POST http://localhost:8000/api/v1/frida/instrument --data \"hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\""
 
                     bat "adb shell monkey -p ${env.APP_PACKAGE} --throttle 300 -v 1000 || echo Monkey finished"
 
-                    bat """
-                    @curl -s -X POST http://localhost:8000/api/v1/dynamic/stop_analysis ^
-                    --data "hash=${env.APK_HASH}&device=${env.DEVICE_ID}" ^
-                    -H "Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
-                    """
+                    bat "@curl -s -X POST http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\""
 
                     def rawOutput = bat(
-                        script: "@curl -s -X POST http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}&device=${env.DEVICE_ID}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\"",
+                        script: "@curl -s -X POST http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: 67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe\"",
                         returnStdout: true
                     ).trim()
 
