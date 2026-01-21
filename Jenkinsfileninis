@@ -119,25 +119,37 @@ pipeline {
                         -no-snapshot ^
                         -no-boot-anim ^
                         -wipe-data
-
                         '''
 
                         echo "Waiting for emulator device..."
                         bat "adb wait-for-device"
 
                         echo "Waiting for boot completion..."
-                        bat '''
-                        for /L %%i in (1,1,30) do (
-                            adb shell getprop sys.boot_completed | findstr 1 && exit /B 0
-                            timeout /T 5 >nul
-                        )
-                        '''
+
+                        def booted = false
+                        for (int i = 0; i < 30; i++) {
+                            def bootStatus = bat(
+                                script: 'adb shell getprop sys.boot_completed',
+                                returnStdout: true
+                            ).trim()
+
+                            if (bootStatus == '1') {
+                                booted = true
+                                break
+                            }
+                            sleep(time: 5, unit: 'SECONDS')
+                        }
+
+                        if (!booted) {
+                            error "Emulator failed to boot in time"
+                        }
 
                         echo "Emulator fully booted"
                     }
                 }
             }
         }
+
 
 
         stage('Install APK') {
