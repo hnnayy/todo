@@ -92,10 +92,12 @@ pipeline {
             steps {
                 echo 'Building Flutter APK'
                 bat '''
-                flutter clean
+                echo Workspace: %CD%
+                dir pubspec.yaml
+
                 flutter pub get
                 flutter build apk --debug
-                '''
+                        '''
             }
         }
 
