@@ -19,6 +19,13 @@ def cleanJsonString(String rawOutput) {
     }
     return rawOutput.substring(firstBrace, lastBrace + 1)
 }
+    parameters {
+        choice(
+            name: 'BUILD_TYPE',
+            choices: ['debug', 'release'],
+            description: 'Pilih tipe build APK'
+        )
+    }
 
 // ================= PIPELINE =================
 pipeline {
@@ -96,7 +103,7 @@ stage('Build Application') {
         dir pubspec.yaml
 
         call flutter pub get
-        call flutter build apk --debug
+        call flutter build apk --${params.BUILD_TYPE}
 
         echo === APK OUTPUT ===
         dir build\\app\\outputs\\flutter-apk
@@ -194,7 +201,8 @@ stage('Build Application') {
                     
                     // [MODIFIKASI] Copy file yang benar (Release/Debug)
                     def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
-                    def destPath = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
+
+                    def destPath = "apk-outputs\\todo-debug-${timestamp}.apk"
                     
                     echo "Copying APK from ${sourcePath} to ${destPath}"
                     bat "copy \"${sourcePath}\" \"${destPath}\""
