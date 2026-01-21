@@ -107,23 +107,38 @@ pipeline {
                     def devices = bat(script: "adb devices", returnStdout: true)
 
                     if (!devices.contains("emulator")) {
-                        bat """
-                        "%ANDROID_HOME%\\emulator\\emulator.exe" ^
+
+                        echo "Starting Android Emulator in background..."
+
+                        bat '''
+                        cmd /c start "" "%ANDROID_HOME%\\emulator\\emulator.exe" ^
                         -avd "%AVD_NAME%" ^
                         -no-window ^
                         -no-audio ^
                         -gpu swiftshader_indirect ^
-                        -wipe-data ^
-                        """
+                        -no-snapshot ^
+                        -no-boot-anim ^
+                        -wipe-data
 
-                        echo "Waiting emulator boot..."
+                        '''
+
+                        echo "Waiting for emulator device..."
                         bat "adb wait-for-device"
-                        bat "adb shell getprop sys.boot_completed"
-                        sleep(time: 20, unit: 'SECONDS')
+
+                        echo "Waiting for boot completion..."
+                        bat '''
+                        for /L %%i in (1,1,30) do (
+                            adb shell getprop sys.boot_completed | findstr 1 && exit /B 0
+                            timeout /T 5 >nul
+                        )
+                        '''
+
+                        echo "Emulator fully booted"
                     }
                 }
             }
         }
+
 
         stage('Install APK') {
             steps {
