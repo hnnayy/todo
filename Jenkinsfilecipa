@@ -1,5 +1,6 @@
 import groovy.json.JsonSlurperClassic
 
+// ================= HELPER =================
 @NonCPS
 def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
@@ -13,30 +14,38 @@ def extractHashFromResponse(String response) {
 def cleanJsonString(String rawOutput) {
     int firstBrace = rawOutput.indexOf('{')
     int lastBrace = rawOutput.lastIndexOf('}')
-    if (firstBrace == -1 || lastBrace == -1) { return null }
+    if (firstBrace == -1 || lastBrace == -1) return null
     return rawOutput.substring(firstBrace, lastBrace + 1)
 }
 
+// ================= PIPELINE =================
 pipeline {
     agent any
 
     environment {
-        // === ANDROID ===
-        ANDROID_HOME = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
-        ANDROID_SDK_ROOT = "${ANDROID_HOME}"
+        // ===== ANDROID SDK =====
+        ANDROID_HOME      = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
+        ANDROID_SDK_ROOT  = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
+        ANDROID_CMDLINE  = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest\\bin"
 
-        // === FLUTTER ===
+        // ===== JAVA =====
+        JAVA_HOME = "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot"
+
+        // ===== FLUTTER =====
         FLUTTER_HOME = "D:\\flutter"
 
-        PATH = "${FLUTTER_HOME}\\bin;${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
+        // ===== PATH (WAJIB LENGKAP) =====
+        PATH = "${FLUTTER_HOME}\\bin;${JAVA_HOME}\\bin;${ANDROID_CMDLINE};${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
 
-        AVD_NAME = "Pixel_4_XL"
-        APP_PACKAGE = "com.example.mobileapp"
+        // ===== APP CONFIG =====
+        AVD_NAME       = "Pixel_4_XL"
+        APP_PACKAGE   = "com.example.mobileapp"
         APK_OUTPUT_DIR = "C:\\ApksGenerated"
     }
 
     stages {
 
+        // ================= CHECKOUT =================
         stage('Checkout') {
             steps {
                 echo 'Checkout source code'
@@ -45,6 +54,7 @@ pipeline {
             }
         }
 
+        // ================= PREPARE =================
         stage('Prepare Folders') {
             steps {
                 bat 'if not exist apk-outputs mkdir apk-outputs'
@@ -58,17 +68,26 @@ pipeline {
             }
         }
 
+        // ================= ENV FIX =================
         stage('Flutter Environment Fix') {
             steps {
-                echo 'Fixing Flutter + Git ownership issue'
+                echo 'Fixing environment & validating tools'
                 bat '''
                 git config --global --add safe.directory D:/flutter
                 git config --global --add safe.directory "%WORKSPACE%"
+
+                where flutter
+                where java
+                where sdkmanager
+                where adb
+
+                flutter config --jdk-dir "%JAVA_HOME%"
                 flutter doctor -v
                 '''
             }
         }
 
+        // ================= BUILD =================
         stage('Build APK') {
             steps {
                 echo 'Building Flutter APK'
@@ -80,6 +99,7 @@ pipeline {
             }
         }
 
+        // ================= SAST =================
         stage('SAST Mobile') {
             steps {
                 script {
@@ -110,6 +130,7 @@ pipeline {
             }
         }
 
+        // ================= EMULATOR =================
         stage('Setup Emulator') {
             steps {
                 script {
@@ -125,17 +146,21 @@ pipeline {
             }
         }
 
+        // ================= INSTALL =================
         stage('Install APK') {
             steps {
                 script {
                     def ts = new Date().format("yyyyMMdd_HHmmss")
-                    bat "copy build\\app\\outputs\\flutter-apk\\app-debug.apk apk-outputs\\todo-${ts}.apk"
+                    def apkPath = "apk-outputs\\todo-${ts}.apk"
+
+                    bat "copy build\\app\\outputs\\flutter-apk\\app-debug.apk ${apkPath}"
                     bat "adb uninstall ${APP_PACKAGE} || exit 0"
-                    bat "adb install apk-outputs\\todo-${ts}.apk"
+                    bat "adb install ${apkPath}"
                 }
             }
         }
 
+        // ================= CLEANUP =================
         stage('Cleanup') {
             steps {
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator stopped'
