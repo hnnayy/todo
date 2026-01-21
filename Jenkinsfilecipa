@@ -171,40 +171,112 @@ stage('Build Application') {
 }
 
 
-        // ================= EMULATOR =================
         stage('Setup Emulator') {
             steps {
                 script {
                     def devices = bat(script: "adb devices", returnStdout: true)
                     if (!devices.contains("emulator")) {
-                        bat """
-                        start /b "" "${ANDROID_HOME}\\emulator\\emulator.exe" -avd ${AVD_NAME} -no-window -no-audio -gpu swiftshader_indirect
-                        """
-                        sleep 60
+                        // [PENTING] -gpu swiftshader_indirect mencegah crash pada Flutter Impeller
+                        echo "Starting emulator with software rendering to prevent Impeller crash..."
+                        bat "start /b \"\" \"${env.ANDROID_HOME}\\emulator\\emulator.exe\" -avd \"${env.AVD_NAME}\" -no-window -no-audio -gpu swiftshader_indirect -wipe-data"
+                        sleep(time: 60, unit: 'SECONDS')
                         bat "adb wait-for-device"
                     }
+                    sleep(time: 15, unit: 'SECONDS')
                 }
             }
         }
 
-        // ================= INSTALL APK =================
         stage('Install APK') {
             steps {
                 script {
-                    def ts = new Date().format("yyyyMMdd_HHmmss")
-                    def destApk = "apk-outputs\\todo-debug-${ts}.apk"
-
-                    bat "copy build\\app\\outputs\\flutter-apk\\app-debug.apk ${destApk}"
-                    bat "adb uninstall ${APP_PACKAGE} || exit 0"
-                    bat "adb install -r ${destApk}"
+                    def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
+                    
+                    // [MODIFIKASI] Copy file yang benar (Release/Debug)
+                    def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
+                    def destPath = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
+                    
+                    echo "Copying APK from ${sourcePath} to ${destPath}"
+                    bat "copy \"${sourcePath}\" \"${destPath}\""
+                    
+                    env.APK_PATH = destPath
+                    
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true) 
+                    bat "adb install -r \"${env.APK_PATH}\""
                 }
             }
         }
 
-        // ================= CLEANUP =================
+        // --- DAST STAGE (HEAVY DUTY) ---
+        stage('DAST Mobile') {
+            steps {
+                script {
+                    echo 'Running DAST with Advanced Instrumentation...'
+                    
+                    // 1. Force Screen UNLOCK (Mengatasi Injection Failed)
+                    echo "Unlocking screen..."
+                    bat "adb shell input keyevent 82" 
+                    sleep(time: 2, unit: 'SECONDS')
+                    bat "adb shell input keyevent 4" 
+                    
+                    // 2. START Analysis
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
+                    echo "Waiting 25s for App Launch..."
+                    sleep(time: 25, unit: 'SECONDS') 
+
+                    // 3. ENABLE FRIDA
+                    echo "Injecting Frida Hooks..."
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/instrument --data \"hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass&auxiliary_hooks=&frida_code=\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true)
+                    
+                    sleep(time: 5, unit: 'SECONDS')
+
+                    // 4. INTERACTION PHASE
+                    echo "Starting Hybrid Interaction..."
+
+                    // A. Logical Input
+                    try {
+                        bat "adb shell input keyevent 61" // Tab
+                        bat "adb shell input text \"TEST\"" 
+                        bat "adb shell input keyevent 66" // Enter
+                    } catch (Exception e) { echo "Input skipped" }
+
+                    // B. Monkey Testing
+                    echo "Running Monkey..."
+                    try {
+                        // [Solusi Sementara] Throttle diubah menjadi 1000 agar memberi waktu napas untuk aplikasi (sebelumnya 300)
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 1000 -v 1000"
+                    } catch (Exception e) {
+                        echo "Monkey finished."
+                    }
+
+                    sleep(time: 15, unit: 'SECONDS') 
+
+                    // 5. STOP Analysis
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    // 6. Get JSON Report
+                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    String jsonString = cleanJsonString(rawOutput)
+                    
+                    if (jsonString != null) {
+                        writeFile file: 'dast_report.json', text: jsonString
+                        echo "DAST JSON Report saved successfully."
+                        echo "✅ DAST Report URL: http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/"
+                    } else {
+                        echo "WARNING: Failed to extract JSON from DAST output."
+                        writeFile file: 'dast_raw.txt', text: rawOutput
+                    }
+
+                    archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Cleanup') {
             steps {
-                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator stopped'
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
             }
         }
     }
@@ -212,6 +284,22 @@ stage('Build Application') {
     post {
         always {
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+
+            // [MODIFIKASI] Mengirim Email dengan Lampiran Report & Link ke SAST/DAST
+            emailext (
+                subject: "Laporan Security Scan Mobile App: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
+                body: """<p>Build Selesai. Berikut detail laporan scan keamanan:</p>
+                         <p><strong>Status Build:</strong> ${currentBuild.currentResult}</p>
+                         <hr>
+                         <p><strong>🔗 Link Laporan MobSF (Localhost):</strong></p>
+                         <ul>
+                            <li><strong>SAST Report (Static):</strong> <a href="http://localhost:8000/static_analyzer/${env.APK_HASH}/">Lihat Laporan SAST</a></li>
+                            <li><strong>DAST Report (Dynamic):</strong> <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Lihat Laporan DAST</a></li>
+                         </ul>
+                         <p><em>File JSON lengkap untuk laporan SAST dan DAST telah dilampirkan pada email ini.</em></p>""",
+                to: "mutiahanin2017@gmail.com, gghurl111@gmail.com",
+                attachmentsPattern: "**/*.json"
+            )
         }
     }
 }
