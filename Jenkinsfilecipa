@@ -4,16 +4,14 @@ import groovy.json.JsonSlurperClassic
 @NonCPS
 def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
-    if (matcher.find()) {
-        return matcher.group(1)
-    }
+    if (matcher.find()) return matcher.group(1)
     return ""
 }
 
 @NonCPS
 def cleanJsonString(String rawOutput) {
     int firstBrace = rawOutput.indexOf('{')
-    int lastBrace = rawOutput.lastIndexOf('}')
+    int lastBrace  = rawOutput.lastIndexOf('}')
     if (firstBrace == -1 || lastBrace == -1) return null
     return rawOutput.substring(firstBrace, lastBrace + 1)
 }
@@ -23,10 +21,10 @@ pipeline {
     agent any
 
     environment {
-        // ===== ANDROID SDK =====
-        ANDROID_HOME      = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
-        ANDROID_SDK_ROOT  = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
-        ANDROID_CMDLINE  = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest\\bin"
+        // ===== ANDROID =====
+        ANDROID_HOME     = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
+        ANDROID_SDK_ROOT = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
+        ANDROID_CMDLINE = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest\\bin"
 
         // ===== JAVA =====
         JAVA_HOME = "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot"
@@ -34,13 +32,11 @@ pipeline {
         // ===== FLUTTER =====
         FLUTTER_HOME = "D:\\flutter"
 
-        // ===== PATH (WAJIB LENGKAP) =====
         PATH = "${FLUTTER_HOME}\\bin;${JAVA_HOME}\\bin;${ANDROID_CMDLINE};${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
 
-        // ===== APP CONFIG =====
-        AVD_NAME       = "Pixel_4_XL"
-        APP_PACKAGE   = "com.example.mobileapp"
-        APK_OUTPUT_DIR = "C:\\ApksGenerated"
+        // ===== APP =====
+        AVD_NAME     = "Pixel_4_XL"
+        APP_PACKAGE = "com.example.mobileapp"
     }
 
     stages {
@@ -54,32 +50,18 @@ pipeline {
             }
         }
 
-        // ================= PREPARE =================
-        stage('Prepare Folders') {
-            steps {
-                bat 'if not exist apk-outputs mkdir apk-outputs'
-                bat "if not exist \"${APK_OUTPUT_DIR}\" mkdir \"${APK_OUTPUT_DIR}\""
-            }
-        }
-
-        stage('Clean APK Folder') {
-            steps {
-                bat "del /Q \"${APK_OUTPUT_DIR}\\*\" 2>NUL || echo Empty"
-            }
-        }
-
-        // ================= ENV FIX =================
+        // ================= ENV VALIDATION =================
         stage('Flutter Environment Fix') {
             steps {
-                echo 'Fixing environment & validating tools'
+                echo 'Validating environment'
                 bat '''
                 git config --global --add safe.directory D:/flutter
                 git config --global --add safe.directory "%WORKSPACE%"
 
                 where flutter
                 where java
-                where sdkmanager
                 where adb
+                where sdkmanager
 
                 flutter config --jdk-dir "%JAVA_HOME%"
                 flutter doctor -v
@@ -87,17 +69,18 @@ pipeline {
             }
         }
 
-        // ================= BUILD =================
+        // ================= BUILD APK =================
         stage('Build APK') {
             steps {
                 echo 'Building Flutter APK'
                 bat '''
-                echo Workspace: %CD%
+                echo === CURRENT DIR ===
+                cd
                 dir pubspec.yaml
 
                 flutter pub get
                 flutter build apk --debug
-                        '''
+                '''
             }
         }
 
@@ -106,13 +89,16 @@ pipeline {
             steps {
                 script {
                     echo 'Running SAST'
+
                     def uploadResponse = bat(
                         script: '@curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: YOUR_TOKEN"',
                         returnStdout: true
                     ).trim()
 
                     def apkHash = extractHashFromResponse(uploadResponse)
-                    if (!apkHash) { error "SAST upload failed" }
+                    if (!apkHash) {
+                        error "SAST upload failed"
+                    }
 
                     env.APK_HASH = apkHash
 
@@ -148,12 +134,12 @@ pipeline {
             }
         }
 
-        // ================= INSTALL =================
+        // ================= INSTALL APK =================
         stage('Install APK') {
             steps {
                 script {
                     def ts = new Date().format("yyyyMMdd_HHmmss")
-                    def apkPath = "apk-outputs\\todo-${ts}.apk"
+                    def apkPath = "app-${ts}.apk"
 
                     bat "copy build\\app\\outputs\\flutter-apk\\app-debug.apk ${apkPath}"
                     bat "adb uninstall ${APP_PACKAGE} || exit 0"
@@ -172,7 +158,7 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+            archiveArtifacts artifacts: '*.apk', allowEmptyArchive: true
         }
     }
 }
