@@ -95,14 +95,15 @@ stage('Build Application') {
         cd
         dir pubspec.yaml
 
-        flutter pub get
-        flutter build apk --debug
+        call flutter pub get
+        call flutter build apk --debug
 
         echo === APK OUTPUT ===
         dir build\\app\\outputs\\flutter-apk
         '''
     }
 }
+
 
 
         // ================= SAST =================
