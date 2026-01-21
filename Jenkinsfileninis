@@ -104,26 +104,34 @@ pipeline {
         stage('Setup Emulator') {
             steps {
                 script {
-                    def devices = bat(script: "adb devices", returnStdout: true)
+                    bat """
+                    adb kill-server
+                    adb start-server
+                    adb devices
 
-                    if (!devices.contains("emulator")) {
-                        bat """
-                        "%ANDROID_HOME%\\emulator\\emulator.exe" ^
-                        -avd "%AVD_NAME%" ^
-                        -no-window ^
-                        -no-audio ^
-                        -gpu swiftshader_indirect ^
-                        -wipe-data ^
-                        """
+                    start /b "" "%ANDROID_HOME%\\emulator\\emulator.exe" ^
+                    -avd %AVD_NAME% ^
+                    -no-window ^
+                    -no-audio ^
+                    -gpu swiftshader_indirect ^
+                    -no-snapshot ^
+                    -no-boot-anim
+                    """
 
-                        echo "Waiting emulator boot..."
-                        bat "adb wait-for-device"
-                        bat "adb shell getprop sys.boot_completed"
-                        sleep(time: 20, unit: 'SECONDS')
-                    }
+                    // TUNGGU EMULATOR SIAP
+                    bat """
+                    adb wait-for-device
+                    :waitloop
+                    adb shell getprop sys.boot_completed | findstr "1" >nul
+                    if errorlevel 1 (
+                        timeout /t 5 >nul
+                        goto waitloop
+                    )
+                    """
                 }
             }
         }
+
 
         stage('Install APK') {
             steps {
