@@ -107,45 +107,69 @@ stage('Build Application') {
 
 
         // ================= SAST =================
-        stage('SAST Mobile') {
-            steps {
-                script {
-                    echo 'Running SAST...'
+ stage('SAST Mobile') {
+    steps {
+        script {
+            echo 'Running SAST...'
 
-                    def apkPath = "build/app/outputs/flutter-apk/app-debug.apk"
+            def apkPath = "build/app/outputs/flutter-apk/app-debug.apk"
+            if (!fileExists(apkPath)) {
+                error "APK not found at ${apkPath}"
+            }
 
-                    if (!fileExists(apkPath)) {
-                        error "APK not found at ${apkPath}"
-                    }
+            // === UPLOAD APK ===
+            def uploadResponse = bat(
+                script: """
+                curl -X POST ^
+                -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac" ^
+                -F "file=@${apkPath}" ^
+                http://localhost:8000/api/v1/upload
+                """,
+                returnStdout: true
+            ).trim()
 
-                    def uploadResponse = bat(
-                        script: "@curl -s -F \"file=@${apkPath}\" http://localhost:8000/api/v1/upload -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"",
-                        returnStdout: true
-                    ).trim()
+            echo "MobSF Upload Response:"
+            echo uploadResponse
 
-                    def apkHash = extractHashFromResponse(uploadResponse)
-                    if (!apkHash) {
-                        error "SAST upload failed"
-                    }
+            def apkHash = extractHashFromResponse(uploadResponse)
+            if (!apkHash) {
+                error "SAST upload failed. MobSF response did not contain hash."
+            }
 
-                    env.APK_HASH = apkHash
-                    echo "SAST Hash: ${apkHash}"
+            env.APK_HASH = apkHash
+            echo "SAST Hash: ${apkHash}"
 
-                    bat "@curl -s -X POST http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\""
+            // === SCAN ===
+            bat """
+            curl -X POST ^
+            -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac" ^
+            --data "hash=${apkHash}" ^
+            http://localhost:8000/api/v1/scan
+            """
 
-                    def rawOutput = bat(
-                        script: "@curl -s -X POST http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"",
-                        returnStdout: true
-                    ).trim()
+            // === REPORT ===
+            def rawOutput = bat(
+                script: """
+                curl -X POST ^
+                -H "Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac" ^
+                --data "hash=${apkHash}" ^
+                http://localhost:8000/api/v1/report_json
+                """,
+                returnStdout: true
+            ).trim()
 
-                    def jsonString = cleanJsonString(rawOutput)
-                    if (jsonString) {
-                        writeFile file: 'sast_report.json', text: jsonString
-                        archiveArtifacts artifacts: 'sast_report.json'
-                    }
-                }
+            def jsonString = cleanJsonString(rawOutput)
+            if (jsonString) {
+                writeFile file: 'sast_report.json', text: jsonString
+                archiveArtifacts artifacts: 'sast_report.json'
+            } else {
+                echo "WARNING: Failed to parse SAST JSON"
+                writeFile file: 'sast_raw.txt', text: rawOutput
             }
         }
+    }
+}
+
 
         // ================= EMULATOR =================
         stage('Setup Emulator') {
