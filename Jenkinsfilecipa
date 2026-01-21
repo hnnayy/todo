@@ -135,19 +135,23 @@ pipeline {
             }
         }
 
-        stage('Install APK') {
-            steps {
-                script {
-                    def ts = new Date().format("dd-MM-yyyy_HH-mm-ss")
-                    def src = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
-                    def dst = "apk-outputs\\todo-${params.BUILD_TYPE}-${ts}.apk"
+stage('Install APK') {
+    steps {
+        script {
+            def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
+            def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
+            def destPath   = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
 
-                    bat "copy \"${src}\" \"${dst}\""
-                    bat "adb uninstall ${APP_PACKAGE}", returnStatus: true
-                    bat "adb install -r \"${dst}\""
-                }
-            }
+            echo "Copying APK from ${sourcePath} to ${destPath}"
+            bat "copy \"${sourcePath}\" \"${destPath}\""
+
+            // FIX SYNTAX
+            bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
+            bat "adb install -r \"${destPath}\""
         }
+    }
+}
+
 
         // ================= DAST =================
         stage('DAST Mobile') {
