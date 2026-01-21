@@ -1,0 +1,151 @@
+import groovy.json.JsonSlurperClassic
+
+@NonCPS
+def extractHashFromResponse(String response) {
+    def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
+    if (matcher.find()) {
+        return matcher.group(1)
+    }
+    return ""
+}
+
+@NonCPS
+def cleanJsonString(String rawOutput) {
+    int firstBrace = rawOutput.indexOf('{')
+    int lastBrace = rawOutput.lastIndexOf('}')
+    if (firstBrace == -1 || lastBrace == -1) { return null }
+    return rawOutput.substring(firstBrace, lastBrace + 1)
+}
+
+pipeline {
+    agent any
+
+    environment {
+        // === ANDROID ===
+        ANDROID_HOME = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
+        ANDROID_SDK_ROOT = "${ANDROID_HOME}"
+
+        // === FLUTTER ===
+        FLUTTER_HOME = "D:\\flutter"
+
+        PATH = "${FLUTTER_HOME}\\bin;${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
+
+        AVD_NAME = "Pixel_4_XL"
+        APP_PACKAGE = "com.example.mobileapp"
+        APK_OUTPUT_DIR = "C:\\ApksGenerated"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Checkout source code'
+                git branch: 'main',
+                    url: 'https://github.com/hnnayy/todo.git'
+            }
+        }
+
+        stage('Prepare Folders') {
+            steps {
+                bat 'if not exist apk-outputs mkdir apk-outputs'
+                bat "if not exist \"${APK_OUTPUT_DIR}\" mkdir \"${APK_OUTPUT_DIR}\""
+            }
+        }
+
+        stage('Clean APK Folder') {
+            steps {
+                bat "del /Q \"${APK_OUTPUT_DIR}\\*\" 2>NUL || echo Empty"
+            }
+        }
+
+        stage('Flutter Environment Fix') {
+            steps {
+                echo 'Fixing Flutter + Git ownership issue'
+                bat '''
+                git config --global --add safe.directory D:/flutter
+                git config --global --add safe.directory "%WORKSPACE%"
+                flutter doctor -v
+                '''
+            }
+        }
+
+        stage('Build APK') {
+            steps {
+                echo 'Building Flutter APK'
+                bat '''
+                flutter clean
+                flutter pub get
+                flutter build apk --debug
+                '''
+            }
+        }
+
+        stage('SAST Mobile') {
+            steps {
+                script {
+                    echo 'Running SAST'
+                    def uploadResponse = bat(
+                        script: '@curl -s -F "file=@build/app/outputs/flutter-apk/app-debug.apk" http://localhost:8000/api/v1/upload -H "Authorization: YOUR_TOKEN"',
+                        returnStdout: true
+                    ).trim()
+
+                    def apkHash = extractHashFromResponse(uploadResponse)
+                    if (!apkHash) { error "SAST upload failed" }
+
+                    env.APK_HASH = apkHash
+
+                    bat "@curl -s -X POST http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: YOUR_TOKEN\""
+
+                    def raw = bat(
+                        script: "@curl -s -X POST http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: YOUR_TOKEN\"",
+                        returnStdout: true
+                    ).trim()
+
+                    def json = cleanJsonString(raw)
+                    if (json) {
+                        writeFile file: 'sast_report.json', text: json
+                        archiveArtifacts artifacts: 'sast_report.json'
+                    }
+                }
+            }
+        }
+
+        stage('Setup Emulator') {
+            steps {
+                script {
+                    def devices = bat(script: "adb devices", returnStdout: true)
+                    if (!devices.contains("emulator")) {
+                        bat """
+                        start /b "" "${ANDROID_HOME}\\emulator\\emulator.exe" -avd ${AVD_NAME} -no-window -no-audio -gpu swiftshader_indirect
+                        """
+                        sleep 60
+                        bat "adb wait-for-device"
+                    }
+                }
+            }
+        }
+
+        stage('Install APK') {
+            steps {
+                script {
+                    def ts = new Date().format("yyyyMMdd_HHmmss")
+                    bat "copy build\\app\\outputs\\flutter-apk\\app-debug.apk apk-outputs\\todo-${ts}.apk"
+                    bat "adb uninstall ${APP_PACKAGE} || exit 0"
+                    bat "adb install apk-outputs\\todo-${ts}.apk"
+                }
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator stopped'
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+        }
+    }
+}
