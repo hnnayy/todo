@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import 'add_todo_page.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'user_settings_page.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const MyApp());
 }
 
@@ -25,13 +28,25 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final List<Task> _tasks = [];
 
-  void _addTask(String title) {
-    setState(() {
-      _tasks.add(Task(
-        id: DateTime.now().toString(),
-        title: title,
-      ));
-    });
+  void _addTask(String title) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('tasks').add({
+        'title': title,
+        'isCompleted': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      setState(() {
+        _tasks.add(Task(id: doc.id, title: title));
+      });
+    } catch (e) {
+      // If Firestore write fails, fallback to local-only add
+      setState(() {
+        _tasks.add(Task(
+          id: DateTime.now().toString(),
+          title: title,
+        ));
+      });
+    }
   }
 
   void _updateTask(String id, String newTitle) {
@@ -44,6 +59,12 @@ class _MainScreenState extends State<MainScreen> {
   void _deleteTask(String id) {
     setState(() {
       _tasks.removeWhere((task) => task.id == id);
+    });
+  }
+
+  void _deleteAllTasks() {
+    setState(() {
+      _tasks.clear();
     });
   }
 
@@ -69,8 +90,8 @@ class _MainScreenState extends State<MainScreen> {
         onUpdateTask: _updateTask,
         onDeleteTask: _deleteTask,
         onToggleTask: _toggleTask,
+        onDeleteAllTasks: _deleteAllTasks,
       ),
-      AddTodoPage(onAddTask: _addTask),
       const UserSettingsPage(),
     ];
 
@@ -81,10 +102,6 @@ class _MainScreenState extends State<MainScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.home),
             label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add),
-            label: 'Tambah To-Do',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
@@ -114,7 +131,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class MyHomePage extends StatelessWidget {
+class MyHomePage extends StatefulWidget {
   const MyHomePage({
     super.key,
     required this.tasks,
@@ -122,6 +139,7 @@ class MyHomePage extends StatelessWidget {
     required this.onUpdateTask,
     required this.onDeleteTask,
     required this.onToggleTask,
+    required this.onDeleteAllTasks,
   });
 
   final List<Task> tasks;
@@ -129,24 +147,38 @@ class MyHomePage extends StatelessWidget {
   final Function(String, String) onUpdateTask;
   final Function(String) onDeleteTask;
   final Function(String) onToggleTask;
+  final Function() onDeleteAllTasks;
 
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text('To-Do List'),
+        actions: [
+          if (widget.tasks.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep),
+              tooltip: 'Hapus Semua',
+              onPressed: () => _showDeleteAllDialog(context),
+            ),
+        ],
       ),
-      body: tasks.isEmpty
+      body: widget.tasks.isEmpty
           ? const Center(child: Text('Belum ada tugas'))
           : ListView.builder(
-              itemCount: tasks.length,
+              itemCount: widget.tasks.length,
               itemBuilder: (context, index) {
-                final task = tasks[index];
+                final task = widget.tasks[index];
                 return ListTile(
                   leading: Checkbox(
                     value: task.isCompleted,
-                    onChanged: (value) => onToggleTask(task.id),
+                    onChanged: (value) => widget.onToggleTask(task.id),
                   ),
                   title: Text(
                     task.title,
@@ -165,7 +197,7 @@ class MyHomePage extends StatelessWidget {
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete),
-                        onPressed: () => onDeleteTask(task.id),
+                        onPressed: () => widget.onDeleteTask(task.id),
                       ),
                     ],
                   ),
@@ -177,6 +209,31 @@ class MyHomePage extends StatelessWidget {
         tooltip: 'Tambah Tugas',
         child: const Icon(Icons.add),
       ),
+    );
+  }
+
+  void _showDeleteAllDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Hapus Semua Tugas'),
+          content: const Text('Apakah Anda yakin ingin menghapus semua tugas?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Batal'),
+            ),
+            TextButton(
+              onPressed: () {
+                widget.onDeleteAllTasks();
+                Navigator.of(context).pop();
+              },
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -199,7 +256,7 @@ class MyHomePage extends StatelessWidget {
             TextButton(
               onPressed: () {
                 if (_controller.text.isNotEmpty) {
-                  onAddTask(_controller.text);
+                  widget.onAddTask(_controller.text);
                   Navigator.of(context).pop();
                 }
               },
@@ -230,7 +287,7 @@ class MyHomePage extends StatelessWidget {
             TextButton(
               onPressed: () {
                 if (_controller.text.isNotEmpty) {
-                  onUpdateTask(task.id, _controller.text);
+                  widget.onUpdateTask(task.id, _controller.text);
                   Navigator.of(context).pop();
                 }
               },
