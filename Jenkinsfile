@@ -186,30 +186,43 @@ pipeline {
 
                     sleep(time: 15, unit: 'SECONDS') 
 
-                    // --- [BARU] 5. TLS/SSL TESTING ---
-                    // Menjalankan tes keamanan TLS (SSL Pinning, Weak Cipher, dll)
+                    // --- [BARU] 5. TLS/SSL SECURITY TEST ---
+                    // Mengambil laporan TLS/SSL Security Tester
                     echo "Running TLS/SSL Security Tests..."
                     def tlsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/android/tls_tests --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
                     String tlsJson = cleanJsonString(tlsRaw)
                     if (tlsJson != null) {
-                        writeFile file: 'tls_tests.json', text: tlsJson
-                        echo "TLS Tests Report saved."
+                        writeFile file: 'tls_report.json', text: tlsJson
+                        echo "✅ TLS Report Saved."
                     }
 
-                    // --- [BARU] 6. FETCH FRIDA LOGS ---
-                    // Mengambil log detail dari Frida (API calls yang tertangkap) untuk dilihat nanti
+                    // --- [BARU] 6. GET FRIDA LOGS (RAW) ---
+                    // Mengambil Frida Log output
                     echo "Fetching Frida Logs..."
-                    def fridaRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/logs --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
-                    String fridaJson = cleanJsonString(fridaRaw)
-                    if (fridaJson != null) {
-                        writeFile file: 'frida_logs.json', text: fridaJson
-                        echo "Frida Logs saved."
+                    def fridaLogsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/logs --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    String fridaLogsJson = cleanJsonString(fridaLogsRaw)
+                    if (fridaLogsJson != null) {
+                        writeFile file: 'frida_logs.json', text: fridaLogsJson
+                        echo "✅ Frida Logs Saved."
                     }
 
-                    // 7. STOP Analysis
+                    // --- [BARU] 7. GET FRIDA API MONITOR (VIEW) ---
+                    // Mengambil data API Monitor untuk 'view' yang lebih detail
+                    echo "Fetching Frida API Monitor Data..."
+                    def fridaMonitorRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/api_monitor --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    String fridaMonitorJson = cleanJsonString(fridaMonitorRaw)
+                    if (fridaMonitorJson != null) {
+                        writeFile file: 'frida_monitor.json', text: fridaMonitorJson
+                        echo "✅ Frida API Monitor Saved."
+                    }
+
+                    // 8. STOP Analysis
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
-                    // 8. Get JSON Report
+                    // 9. Get JSON Report
                     def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
                     String jsonString = cleanJsonString(rawOutput)
@@ -223,8 +236,8 @@ pipeline {
                         writeFile file: 'dast_raw.txt', text: rawOutput
                     }
 
-                    // [BARU] Simpan TLS dan Frida logs ke Artifacts agar bisa didownload
-                    archiveArtifacts artifacts: 'dast_report.json, tls_tests.json, frida_logs.json', allowEmptyArchive: true
+                    // [BARU] Simpan semua report baru ke Artifacts
+                    archiveArtifacts artifacts: 'dast_report.json, tls_report.json, frida_logs.json, frida_monitor.json', allowEmptyArchive: true
                 }
             }
         }
@@ -240,7 +253,7 @@ pipeline {
         always {
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-            // [MODIFIKASI] Mengirim Email dengan Lampiran Report & Link ke SAST/DAST
+            // [MODIFIKASI] Mengirim Email dengan Lampiran Report Lengkap
             emailext (
                 subject: "Laporan Security Scan Mobile App: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
                 body: """<p>Build Selesai. Berikut detail laporan scan keamanan:</p>
@@ -251,7 +264,7 @@ pipeline {
                            <li><strong>SAST Report (Static):</strong> <a href="http://localhost:8000/static_analyzer/${env.APK_HASH}/">Lihat Laporan SAST</a></li>
                            <li><strong>DAST Report (Dynamic):</strong> <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Lihat Laporan DAST</a></li>
                          </ul>
-                         <p><em>File JSON lengkap (SAST, DAST, TLS, Frida Logs) telah dilampirkan pada email ini.</em></p>""",
+                         <p><em>File JSON lengkap (SAST, DAST, TLS Report, Frida Logs, & API Monitor) telah dilampirkan pada email ini.</em></p>""",
                 to: "mutiahanin2017@gmail.com, gghurl111@gmail.com",
                 attachmentsPattern: "**/*.json"
             )
