@@ -175,11 +175,11 @@ pipeline {
                         bat "adb shell input keyevent 66" // Enter
                     } catch (Exception e) { echo "Input skipped" }
 
-                    // B. Monkey Testing
-                    echo "Running Monkey..."
+                    // B. Monkey Testing (OPTIMIZED FOR SPEED)
+                    echo "Running Monkey (Fast Mode)..."
                     try {
-                        // [Solusi Sementara] Throttle diubah menjadi 1000 agar memberi waktu napas untuk aplikasi (sebelumnya 300)
-                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 1000 -v 1000"
+                        // [MODIFIKASI] Throttle 1500 (1.5 detik) agar stabil, dan count 200 agar durasi cepat selesai (sekitar 5 menit total)
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 1500 -v 200"
                     } catch (Exception e) {
                         echo "Monkey finished."
                     }
@@ -227,8 +227,8 @@ pipeline {
                          <hr>
                          <p><strong>🔗 Link Laporan MobSF (Localhost):</strong></p>
                          <ul>
-                            <li><strong>SAST Report (Static):</strong> <a href="http://localhost:8000/static_analyzer/${env.APK_HASH}/">Lihat Laporan SAST</a></li>
-                            <li><strong>DAST Report (Dynamic):</strong> <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Lihat Laporan DAST</a></li>
+                           <li><strong>SAST Report (Static):</strong> <a href="http://localhost:8000/static_analyzer/${env.APK_HASH}/">Lihat Laporan SAST</a></li>
+                           <li><strong>DAST Report (Dynamic):</strong> <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Lihat Laporan DAST</a></li>
                          </ul>
                          <p><em>File JSON lengkap untuk laporan SAST dan DAST telah dilampirkan pada email ini.</em></p>""",
                 to: "mutiahanin2017@gmail.com, gghurl111@gmail.com",
