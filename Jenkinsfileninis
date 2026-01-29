@@ -47,7 +47,6 @@ pipeline {
         stage('Prepare Workspace') {
             steps {
                 bat "if not exist ${APK_DIR} mkdir ${APK_DIR}"
-                bat "git config --global --add safe.directory \"%WORKSPACE%\""
             }
         }
 
