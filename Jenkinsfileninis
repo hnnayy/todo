@@ -1,115 +1,137 @@
 import groovy.json.JsonSlurperClassic
 
 @NonCPS
-def extractHash(String response) {
+def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
     return matcher.find() ? matcher.group(1) : ""
 }
 
 @NonCPS
-def cleanJson(String raw) {
-    int start = raw.indexOf('{')
-    int end = raw.lastIndexOf('}')
-    return (start >= 0 && end >= 0) ? raw.substring(start, end + 1) : null
+def cleanJsonString(String rawOutput) {
+    int firstBrace = rawOutput.indexOf('{')
+    int lastBrace  = rawOutput.lastIndexOf('}')
+    if (firstBrace == -1 || lastBrace == -1) return null
+    return rawOutput.substring(firstBrace, lastBrace + 1)
 }
 
 pipeline {
     agent any
 
-    environment {
-        ANDROID_HOME = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
-        FLUTTER_HOME = "D:\\MobDev\\Flutter SDK\\flutter"
+    parameters {
+        choice(
+            name: 'BUILD_TYPE',
+            choices: ['debug', 'release'],
+            description: 'Pilih tipe build APK'
+        )
+    }
 
-        PATH = "C:\\Windows\\System32;" +
-               "${FLUTTER_HOME}\\bin;" +
-               "${ANDROID_HOME}\\platform-tools;" +
-               "${ANDROID_HOME}\\emulator;" +
-               "${PATH}"
+    environment {
+        ANDROID_HOME     = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
+        ANDROID_SDK_ROOT = "${ANDROID_HOME}"
+        FLUTTER_HOME     = "D:\\MobDev\\Flutter SDK\\flutter"
+        JAVA_HOME        = "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot"
+
+        PATH = "${FLUTTER_HOME}\\bin;${JAVA_HOME}\\bin;${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
 
         AVD_NAME    = "Pixel_4_XL"
         APP_PACKAGE = "com.example.mobileapp"
 
+        MOBSF_TOKEN = "67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
         MOBSF_URL   = "http://localhost:8000"
-        MOBSF_TOKEN = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
     }
 
     stages {
 
-        stage('Checkout Source') {
+        stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/hnnayy/todo.git'
+                git branch: 'main', url: 'https://github.com/hnnayy/todo.git'
+            }
+        }
+
+        stage('Prepare') {
+            steps {
+                bat 'if not exist apk-outputs mkdir apk-outputs'
+            }
+        }
+
+        stage('Flutter Environment') {
+            steps {
+                bat '''
+                git config --global --add safe.directory "%WORKSPACE%"
+                flutter config --jdk-dir "%JAVA_HOME%"
+                flutter doctor -v
+                '''
             }
         }
 
         stage('Build APK') {
             steps {
-                bat "flutter pub get"
-                bat "flutter build apk --debug"
-                bat "dir build\\app\\outputs\\flutter-apk"
+                bat """
+                flutter pub get
+                flutter build apk --${params.BUILD_TYPE}
+                dir build\\app\\outputs\\flutter-apk
+                """
             }
         }
 
-        // ======================= SAST ==========================
-        stage('SAST - Static Analysis (MobSF)') {
+        // ================= SAST =================
+        stage('SAST Mobile') {
             steps {
                 script {
-                    echo "Uploading APK to MobSF (SAST)"
+                    def apkPath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
+                    if (!fileExists(apkPath)) {
+                        error "APK not found: ${apkPath}"
+                    }
 
-                    def uploadResp = bat(
+                    def uploadResponse = bat(
                         script: """
-                        curl -s ^
-                        -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
-                        -H "Authorization: ${MOBSF_TOKEN}" ^
-                        ${MOBSF_URL}/api/v1/upload
+                        curl -s -X POST ^
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        -F "file=@${apkPath}" ^
+                        ${env.MOBSF_URL}/api/v1/upload
                         """,
                         returnStdout: true
                     ).trim()
 
-                    env.APK_HASH = extractHash(uploadResp)
-                    if (!env.APK_HASH) {
-                        error "MobSF upload failed — hash not returned"
-                    }
+                    echo "MobSF Upload Response:"
+                    echo uploadResponse
 
-                    echo "APK HASH: ${env.APK_HASH}"
+                    def apkHash = extractHashFromResponse(uploadResponse)
+                    if (!apkHash) error "SAST upload failed – hash not returned"
+
+                    env.APK_HASH = apkHash
 
                     bat """
                     curl -s -X POST ^
-                    -d "hash=${env.APK_HASH}" ^
-                    -H "Authorization: ${MOBSF_TOKEN}" ^
-                    ${MOBSF_URL}/api/v1/scan
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${apkHash}" ^
+                    ${env.MOBSF_URL}/api/v1/scan
                     """
 
                     def rawReport = bat(
                         script: """
                         curl -s -X POST ^
-                        -d "hash=${env.APK_HASH}" ^
-                        -H "Authorization: ${MOBSF_TOKEN}" ^
-                        ${MOBSF_URL}/api/v1/report_json
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        --data "hash=${apkHash}" ^
+                        ${env.MOBSF_URL}/api/v1/report_json
                         """,
                         returnStdout: true
                     ).trim()
 
-                    def json = cleanJson(rawReport)
+                    def json = cleanJsonString(rawReport)
                     if (json) {
                         writeFile file: 'sast_report.json', text: json
+                        archiveArtifacts artifacts: 'sast_report.json'
                     }
-
-                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: true
                 }
             }
         }
 
-        // ===================== EMULATOR ========================
-        stage('Start Emulator') {
+        stage('Setup Emulator') {
             steps {
                 bat """
-                "%ANDROID_HOME%\\emulator\\emulator.exe" ^
-                -avd ${AVD_NAME} ^
-                -no-snapshot ^
-                -no-audio ^
-                -no-boot-anim ^
-                -gpu swiftshader_indirect
+                start /b "" "${ANDROID_HOME}\\emulator\\emulator.exe" ^
+                -avd ${AVD_NAME} -no-window -no-audio -gpu swiftshader_indirect
                 """
                 sleep 60
                 bat "adb wait-for-device"
@@ -118,50 +140,63 @@ pipeline {
 
         stage('Install APK') {
             steps {
-                bat "adb uninstall ${APP_PACKAGE} || exit 0"
-                bat "adb install -r build\\app\\outputs\\flutter-apk\\app-debug.apk"
+                script {
+                    def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
+                    def src = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
+                    def dst = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
+
+                    bat "copy \"${src}\" \"${dst}\""
+                    bat(script: "adb uninstall ${APP_PACKAGE}", returnStatus: true)
+                    bat "adb install -r \"${dst}\""
+                }
             }
         }
 
-        // ======================= DAST ==========================
-        stage('DAST - Dynamic Analysis (MobSF)') {
+        // ================= DAST =================
+        stage('DAST Mobile') {
             steps {
                 script {
                     bat "adb shell input keyevent 82"
+                    sleep 2
 
                     bat """
                     curl -s -X POST ^
-                    -d "hash=${env.APK_HASH}" ^
-                    -H "Authorization: ${MOBSF_TOKEN}" ^
-                    ${MOBSF_URL}/api/v1/dynamic/start_analysis
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
                     """
 
-                    sleep 30
+                    sleep 25
 
                     bat """
                     curl -s -X POST ^
-                    -d "hash=${env.APK_HASH}" ^
-                    -H "Authorization: ${MOBSF_TOKEN}" ^
-                    ${MOBSF_URL}/api/v1/dynamic/stop_analysis
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
 
                     def raw = bat(
                         script: """
                         curl -s -X POST ^
-                        -d "hash=${env.APK_HASH}" ^
-                        -H "Authorization: ${MOBSF_TOKEN}" ^
-                        ${MOBSF_URL}/api/v1/dynamic/report_json
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        --data "hash=${env.APK_HASH}" ^
+                        ${env.MOBSF_URL}/api/v1/dynamic/report_json
                         """,
                         returnStdout: true
                     ).trim()
 
-                    def json = cleanJson(raw)
+                    def json = cleanJsonString(raw)
                     if (json) {
                         writeFile file: 'dast_report.json', text: json
+                        archiveArtifacts artifacts: 'dast_report.json'
                     }
-
-                    archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: true
                 }
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator stopped'
             }
         }
     }
