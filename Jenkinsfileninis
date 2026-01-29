@@ -22,10 +22,12 @@ pipeline {
         ANDROID_HOME = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
         FLUTTER_HOME = "D:\\MobDev\\Flutter SDK\\flutter"
 
-        PATH = "${env.FLUTTER_HOME}\\bin;" +
-               "${env.ANDROID_HOME}\\platform-tools;" +
-               "${env.ANDROID_HOME}\\emulator;" +
-               "%PATH%"
+        PATH = "C:\\Windows\\System32;" +
+                "${env.FLUTTER_HOME}\\bin;" +
+                "${env.ANDROID_HOME}\\platform-tools;" +
+                "${env.ANDROID_HOME}\\emulator;" +
+                "${env.PATH}"
+
 
         AVD_NAME     = "Pixel_4_XL"
         APP_PACKAGE  = "com.example.mobileapp"
