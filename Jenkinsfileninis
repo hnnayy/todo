@@ -67,7 +67,7 @@ pipeline {
 
                     def uploadResp = bat(
                         script: """
-                        call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s ^
+                        call  "C:\Program Files\Git\usr\bin\curl.exe" -s ^
                           -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/upload
@@ -83,7 +83,7 @@ pipeline {
                     echo "APK HASH: ${env.APK_HASH}"
 
                     bat """
-                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
                       -d "hash=${env.APK_HASH}" ^
                       -H "Authorization: ${env.MOBSF_TOKEN}" ^
                       ${env.MOBSF_URL}/api/v1/scan
@@ -91,7 +91,7 @@ pipeline {
 
                     def rawReport = bat(
                         script: """
-                        call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                        call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/report_json
@@ -144,7 +144,7 @@ pipeline {
                     bat "adb shell input keyevent 82"
 
                     bat """
-                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
                       -d "hash=${env.APK_HASH}" ^
                       -H "Authorization: ${env.MOBSF_TOKEN}" ^
                       ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
@@ -153,7 +153,7 @@ pipeline {
                     sleep 25
 
                     bat """
-                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
                       -d "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass" ^
                       -H "Authorization: ${env.MOBSF_TOKEN}" ^
                       ${env.MOBSF_URL}/api/v1/frida/instrument
@@ -162,7 +162,7 @@ pipeline {
                     bat "adb shell monkey -p ${APP_PACKAGE} --throttle 300 -v 300"
 
                     bat """
-                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
                       -d "hash=${env.APK_HASH}" ^
                       -H "Authorization: ${env.MOBSF_TOKEN}" ^
                       ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
@@ -170,7 +170,7 @@ pipeline {
 
                     def raw = bat(
                         script: """
-                        call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                        call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/dynamic/report_json
