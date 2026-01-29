@@ -1,6 +1,5 @@
 import groovy.json.JsonSlurperClassic
 
-// ===================== HELPER FUNCTIONS =====================
 @NonCPS
 def extractHash(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
@@ -13,7 +12,6 @@ def cleanJson(String raw) {
     int end = raw.lastIndexOf('}')
     return (start >= 0 && end >= 0) ? raw.substring(start, end + 1) : null
 }
-// ============================================================
 
 pipeline {
     agent any
@@ -30,7 +28,6 @@ pipeline {
 
         AVD_NAME    = "Pixel_4_XL"
         APP_PACKAGE = "com.example.mobileapp"
-        APK_DIR     = "apk-outputs"
 
         MOBSF_URL   = "http://localhost:8000"
         MOBSF_TOKEN = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
@@ -45,17 +42,10 @@ pipeline {
             }
         }
 
-        stage('Prepare Workspace') {
-            steps {
-                bat "if not exist ${APK_DIR} mkdir ${APK_DIR}"
-            }
-        }
-
         stage('Build APK') {
             steps {
                 bat "flutter pub get"
                 bat "flutter build apk --debug"
-                bat "dir build\\app\\outputs\\flutter-apk"
             }
         }
 
@@ -63,38 +53,36 @@ pipeline {
         stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
-                    echo "Uploading APK to MobSF (SAST)"
+                    echo "Uploading APK to MobSF"
 
                     def uploadResp = bat(
                         script: """
-                        call  "C:\Program Files\Git\usr\bin\curl.exe" -s ^
-                          -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/upload
+                        "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s ^
+                        -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
+                        -H "Authorization: ${MOBSF_TOKEN}" ^
+                        ${MOBSF_URL}/api/v1/upload
                         """,
                         returnStdout: true
                     ).trim()
 
                     env.APK_HASH = extractHash(uploadResp)
                     if (!env.APK_HASH) {
-                        error "SAST upload failed: no hash returned"
+                        error "MobSF upload failed — hash not returned"
                     }
 
-                    echo "APK HASH: ${env.APK_HASH}"
-
                     bat """
-                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
-                      -d "hash=${env.APK_HASH}" ^
-                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                      ${env.MOBSF_URL}/api/v1/scan
+                    "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                    -d "hash=${env.APK_HASH}" ^
+                    -H "Authorization: ${MOBSF_TOKEN}" ^
+                    ${MOBSF_URL}/api/v1/scan
                     """
 
                     def rawReport = bat(
                         script: """
-                        call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
-                          -d "hash=${env.APK_HASH}" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/report_json
+                        "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                        -d "hash=${env.APK_HASH}" ^
+                        -H "Authorization: ${MOBSF_TOKEN}" ^
+                        ${MOBSF_URL}/api/v1/report_json
                         """,
                         returnStdout: true
                     ).trim()
@@ -112,21 +100,16 @@ pipeline {
         // ===================== EMULATOR ========================
         stage('Start Emulator') {
             steps {
-                script {
-                    def devices = bat(script: "adb devices", returnStdout: true)
-                    if (!devices.contains("emulator")) {
-                        bat """
-                        "%ANDROID_HOME%\\emulator\\emulator.exe" ^
-                          -avd ${AVD_NAME} ^
-                          -no-snapshot ^
-                          -no-audio ^
-                          -no-boot-anim ^
-                          -gpu swiftshader_indirect
-                        """
-                        sleep 60
-                        bat "adb wait-for-device"
-                    }
-                }
+                bat """
+                "%ANDROID_HOME%\\emulator\\emulator.exe" ^
+                -avd ${AVD_NAME} ^
+                -no-snapshot ^
+                -no-audio ^
+                -no-boot-anim ^
+                -gpu swiftshader_indirect
+                """
+                sleep 60
+                bat "adb wait-for-device"
             }
         }
 
@@ -141,39 +124,28 @@ pipeline {
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
-                    bat "adb shell input keyevent 82"
-
                     bat """
-                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
-                      -d "hash=${env.APK_HASH}" ^
-                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                      ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
+                    "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                    -d "hash=${env.APK_HASH}" ^
+                    -H "Authorization: ${MOBSF_TOKEN}" ^
+                    ${MOBSF_URL}/api/v1/dynamic/start_analysis
                     """
 
-                    sleep 25
+                    sleep 30
 
                     bat """
-                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
-                      -d "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass" ^
-                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                      ${env.MOBSF_URL}/api/v1/frida/instrument
-                    """
-
-                    bat "adb shell monkey -p ${APP_PACKAGE} --throttle 300 -v 300"
-
-                    bat """
-                    call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
-                      -d "hash=${env.APK_HASH}" ^
-                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                      ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
+                    "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                    -d "hash=${env.APK_HASH}" ^
+                    -H "Authorization: ${MOBSF_TOKEN}" ^
+                    ${MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
 
                     def raw = bat(
                         script: """
-                        call  "C:\Program Files\Git\usr\bin\curl.exe" -s -X POST ^
-                          -d "hash=${env.APK_HASH}" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/dynamic/report_json
+                        "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                        -d "hash=${env.APK_HASH}" ^
+                        -H "Authorization: ${MOBSF_TOKEN}" ^
+                        ${MOBSF_URL}/api/v1/dynamic/report_json
                         """,
                         returnStdout: true
                     ).trim()
@@ -186,18 +158,6 @@ pipeline {
                     archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: true
                 }
             }
-        }
-
-        stage('Cleanup') {
-            steps {
-                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || exit 0'
-            }
-        }
-    }
-
-    post {
-        always {
-            archiveArtifacts artifacts: 'build/app/outputs/flutter-apk/*.apk', allowEmptyArchive: true
         }
     }
 }
