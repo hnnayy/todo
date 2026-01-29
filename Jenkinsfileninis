@@ -1,5 +1,6 @@
 import groovy.json.JsonSlurperClassic
 
+// ================= HELPER METHODS =================
 @NonCPS
 def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
@@ -14,6 +15,7 @@ def cleanJsonString(String rawOutput) {
     return rawOutput.substring(firstBrace, lastBrace + 1)
 }
 
+// ================= PIPELINE =================
 pipeline {
     agent any
 
@@ -21,7 +23,7 @@ pipeline {
         choice(
             name: 'BUILD_TYPE',
             choices: ['debug', 'release'],
-            description: 'Pilih tipe build APK'
+            description: 'Pilih tipe build APK (Release direkomendasikan untuk audit)'
         )
     }
 
@@ -36,34 +38,38 @@ pipeline {
         AVD_NAME    = "Pixel_4_XL"
         APP_PACKAGE = "com.example.mobileapp"
 
-        MOBSF_TOKEN = "67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
         MOBSF_URL   = "http://localhost:8000"
+        MOBSF_TOKEN = "67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
     }
 
     stages {
 
+        // ================= CHECKOUT =================
         stage('Checkout') {
             steps {
                 git branch: 'main', url: 'https://github.com/hnnayy/todo.git'
             }
         }
 
-        stage('Prepare') {
+        // ================= PREPARE =================
+        stage('Prepare Workspace') {
             steps {
                 bat 'if not exist apk-outputs mkdir apk-outputs'
             }
         }
 
-        stage('Flutter Environment') {
+        // ================= FLUTTER ENV =================
+        stage('Flutter Environment Check') {
             steps {
-                bat '''
+                bat """
                 git config --global --add safe.directory "%WORKSPACE%"
-                flutter config --jdk-dir "%JAVA_HOME%"
+                flutter config --jdk-dir "${env.JAVA_HOME}"
                 flutter doctor -v
-                '''
+                """
             }
         }
 
+        // ================= BUILD APK =================
         stage('Build APK') {
             steps {
                 bat """
@@ -75,7 +81,7 @@ pipeline {
         }
 
         // ================= SAST =================
-        stage('SAST Mobile') {
+        stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
                     def apkPath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
@@ -83,9 +89,11 @@ pipeline {
                         error "APK not found: ${apkPath}"
                     }
 
+                    echo "Uploading APK to MobSF (SAST)..."
+
                     def uploadResponse = bat(
                         script: """
-                        curl -s -X POST ^
+                        @curl -s ^
                         -H "Authorization: ${env.MOBSF_TOKEN}" ^
                         -F "file=@${apkPath}" ^
                         ${env.MOBSF_URL}/api/v1/upload
@@ -93,16 +101,14 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    echo "MobSF Upload Response:"
-                    echo uploadResponse
-
                     def apkHash = extractHashFromResponse(uploadResponse)
-                    if (!apkHash) error "SAST upload failed – hash not returned"
+                    if (!apkHash) error "MobSF upload failed"
 
                     env.APK_HASH = apkHash
+                    echo "SAST Hash: ${apkHash}"
 
                     bat """
-                    curl -s -X POST ^
+                    @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
                     --data "hash=${apkHash}" ^
                     ${env.MOBSF_URL}/api/v1/scan
@@ -110,7 +116,7 @@ pipeline {
 
                     def rawReport = bat(
                         script: """
-                        curl -s -X POST ^
+                        @curl -s -X POST ^
                         -H "Authorization: ${env.MOBSF_TOKEN}" ^
                         --data "hash=${apkHash}" ^
                         ${env.MOBSF_URL}/api/v1/report_json
@@ -122,45 +128,54 @@ pipeline {
                     if (json) {
                         writeFile file: 'sast_report.json', text: json
                         archiveArtifacts artifacts: 'sast_report.json'
+                        echo "✅ SAST Report URL: ${env.MOBSF_URL}/static_analyzer/${apkHash}/"
                     }
                 }
             }
         }
 
-        stage('Setup Emulator') {
+        // ================= EMULATOR =================
+        stage('Start Emulator') {
             steps {
                 bat """
-                start /b "" "${ANDROID_HOME}\\emulator\\emulator.exe" ^
-                -avd ${AVD_NAME} -no-window -no-audio -gpu swiftshader_indirect
+                start /b "" "${env.ANDROID_HOME}\\emulator\\emulator.exe" ^
+                -avd "${env.AVD_NAME}" ^
+                -no-window -no-audio ^
+                -gpu swiftshader_indirect -wipe-data
                 """
                 sleep 60
                 bat "adb wait-for-device"
+                bat "adb shell getprop sys.boot_completed"
             }
         }
 
+        // ================= INSTALL APK =================
         stage('Install APK') {
             steps {
                 script {
-                    def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
-                    def src = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
-                    def dst = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
+                    def timestamp  = new Date().format("dd-MM-yyyy_HH-mm-ss")
+                    def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
+                    def destPath   = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
 
-                    bat "copy \"${src}\" \"${dst}\""
-                    bat(script: "adb uninstall ${APP_PACKAGE}", returnStatus: true)
-                    bat "adb install -r \"${dst}\""
+                    bat "copy \"${sourcePath}\" \"${destPath}\""
+
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
+                    bat "adb install -r \"${destPath}\""
                 }
             }
         }
 
         // ================= DAST =================
-        stage('DAST Mobile') {
+        stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
+                    // Unlock screen
                     bat "adb shell input keyevent 82"
                     sleep 2
 
+                    // Start analysis
                     bat """
-                    curl -s -X POST ^
+                    @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
                     --data "hash=${env.APK_HASH}" ^
                     ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
@@ -168,16 +183,47 @@ pipeline {
 
                     sleep 25
 
+                    // Frida Instrumentation
                     bat """
-                    curl -s -X POST ^
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass" ^
+                    ${env.MOBSF_URL}/api/v1/frida/instrument
+                    """
+
+                    // Monkey testing
+                    try {
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --throttle 1500 -v 200"
+                    } catch (Exception e) {
+                        echo "Monkey finished."
+                    }
+
+                    // TLS Tests
+                    def tlsRaw = bat(
+                        script: """
+                        @curl -s -X POST ^
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        --data "hash=${env.APK_HASH}" ^
+                        ${env.MOBSF_URL}/api/v1/android/tls_tests
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    def tlsJson = cleanJsonString(tlsRaw)
+                    if (tlsJson) writeFile file: 'tls_report.json', text: tlsJson
+
+                    // Stop analysis
+                    bat """
+                    @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
                     --data "hash=${env.APK_HASH}" ^
                     ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
 
+                    // Get DAST report
                     def raw = bat(
                         script: """
-                        curl -s -X POST ^
+                        @curl -s -X POST ^
                         -H "Authorization: ${env.MOBSF_TOKEN}" ^
                         --data "hash=${env.APK_HASH}" ^
                         ${env.MOBSF_URL}/api/v1/dynamic/report_json
@@ -188,15 +234,17 @@ pipeline {
                     def json = cleanJsonString(raw)
                     if (json) {
                         writeFile file: 'dast_report.json', text: json
-                        archiveArtifacts artifacts: 'dast_report.json'
+                        archiveArtifacts artifacts: 'dast_report.json, tls_report.json', allowEmptyArchive: true
+                        echo "✅ DAST Report URL: ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
                     }
                 }
             }
         }
 
+        // ================= CLEANUP =================
         stage('Cleanup') {
             steps {
-                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator stopped'
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
             }
         }
     }
