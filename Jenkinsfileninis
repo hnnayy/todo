@@ -19,25 +19,32 @@ pipeline {
     agent any
 
     environment {
+        // === ANDROID & FLUTTER ===
         ANDROID_HOME = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
         FLUTTER_HOME = "D:\\MobDev\\Flutter SDK\\flutter"
 
         PATH = "C:\\Windows\\System32;" +
-                "${env.FLUTTER_HOME}\\bin;" +
-                "${env.ANDROID_HOME}\\platform-tools;" +
-                "${env.ANDROID_HOME}\\emulator;" +
-                "${env.PATH}"
+               "${env.FLUTTER_HOME}\\bin;" +
+               "${env.ANDROID_HOME}\\platform-tools;" +
+               "${env.ANDROID_HOME}\\emulator;" +
+               "${env.PATH}"
 
+        // === TOOLS ===
+        CURL = "C:\\Program Files\\Git\\usr\\bin\\curl.exe"
 
-        AVD_NAME     = "Pixel_4_XL"
-        APP_PACKAGE  = "com.example.mobileapp"
-        APK_DIR      = "apk-outputs"
-        MOBSF_URL    = "http://localhost:8000"
-        MOBSF_TOKEN  = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
+        // === APP CONFIG ===
+        AVD_NAME    = "Pixel_4_XL"
+        APP_PACKAGE = "com.example.mobileapp"
+        APK_DIR     = "apk-outputs"
+
+        // === MOBSF ===
+        MOBSF_URL   = "http://localhost:8000"
+        MOBSF_TOKEN = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
     }
 
     stages {
 
+        // ================= CHECKOUT =================
         stage('Checkout Source') {
             steps {
                 echo "Checkout source code"
@@ -46,24 +53,24 @@ pipeline {
             }
         }
 
+        // ================= PREPARE ==================
         stage('Prepare Workspace') {
             steps {
                 bat "if not exist ${APK_DIR} mkdir ${APK_DIR}"
             }
         }
 
+        // ================= BUILD ====================
         stage('Build APK') {
             steps {
                 echo "Building Flutter APK"
                 bat "flutter pub get"
                 bat "flutter build apk --debug"
-
-                // sanity check
                 bat "dir build\\app\\outputs\\flutter-apk"
             }
         }
 
-        // ======================= SAST ==========================
+        // ================= SAST =====================
         stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
@@ -71,7 +78,7 @@ pipeline {
 
                     def uploadResp = bat(
                         script: """
-                        curl -s ^
+                        "${env.CURL}" -s ^
                           -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/upload
@@ -87,7 +94,7 @@ pipeline {
                     echo "APK HASH: ${env.APK_HASH}"
 
                     bat """
-                        curl -s -X POST ^
+                        "${env.CURL}" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/scan
@@ -95,7 +102,7 @@ pipeline {
 
                     def rawReport = bat(
                         script: """
-                        curl -s -X POST ^
+                        "${env.CURL}" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/report_json
@@ -113,20 +120,20 @@ pipeline {
             }
         }
 
-        // ===================== EMULATOR ========================
+        // ================= EMULATOR =================
         stage('Start Emulator') {
             steps {
                 script {
                     def devices = bat(script: "adb devices", returnStdout: true)
                     if (!devices.contains("emulator")) {
                         bat """
-												"%ANDROID_HOME%\\emulator\\emulator.exe" ^
-												  -avd ${AVD_NAME} ^
-												  -no-snapshot ^
-												  -no-audio ^
-												  -no-boot-anim ^
-												  -gpu swiftshader_indirect
-												"""
+                        "%ANDROID_HOME%\\emulator\\emulator.exe" ^
+                          -avd ${AVD_NAME} ^
+                          -no-snapshot ^
+                          -no-audio ^
+                          -no-boot-anim ^
+                          -gpu swiftshader_indirect
+                        """
                         sleep 60
                         bat "adb wait-for-device"
                     }
@@ -136,25 +143,22 @@ pipeline {
 
         stage('Install APK') {
             steps {
-                script {
-                    bat "adb uninstall ${APP_PACKAGE} || exit 0"
-                    bat "adb install -r build\\app\\outputs\\flutter-apk\\app-debug.apk"
-                }
+                bat "adb uninstall ${APP_PACKAGE} || exit 0"
+                bat "adb install -r build\\app\\outputs\\flutter-apk\\app-debug.apk"
             }
         }
 
-        // ======================= DAST ==========================
+        // ================= DAST =====================
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
                     echo "Starting DAST analysis"
 
-                    // unlock emulator
                     bat "adb shell input keyevent 82"
                     sleep 2
 
                     bat """
-                        curl -s -X POST ^
+                        "${env.CURL}" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
@@ -163,17 +167,16 @@ pipeline {
                     sleep 25
 
                     bat """
-                        curl -s -X POST ^
+                        "${env.CURL}" -s -X POST ^
                           -d "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/frida/instrument
                     """
 
-                    // light interaction
                     bat "adb shell monkey -p ${APP_PACKAGE} --throttle 300 -v 300"
 
                     bat """
-                        curl -s -X POST ^
+                        "${env.CURL}" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
@@ -181,7 +184,7 @@ pipeline {
 
                     def raw = bat(
                         script: """
-                        curl -s -X POST ^
+                        "${env.CURL}" -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/dynamic/report_json
@@ -199,6 +202,7 @@ pipeline {
             }
         }
 
+        // ================= CLEANUP ==================
         stage('Cleanup') {
             steps {
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || exit 0'
