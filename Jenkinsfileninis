@@ -19,58 +19,47 @@ pipeline {
     agent any
 
     environment {
-        // === ANDROID & FLUTTER ===
         ANDROID_HOME = "C:\\Users\\Nisrina\\AppData\\Local\\Android\\Sdk"
         FLUTTER_HOME = "D:\\MobDev\\Flutter SDK\\flutter"
 
         PATH = "C:\\Windows\\System32;" +
-               "${env.FLUTTER_HOME}\\bin;" +
-               "${env.ANDROID_HOME}\\platform-tools;" +
-               "${env.ANDROID_HOME}\\emulator;" +
-               "${env.PATH}"
+               "${FLUTTER_HOME}\\bin;" +
+               "${ANDROID_HOME}\\platform-tools;" +
+               "${ANDROID_HOME}\\emulator;" +
+               "${PATH}"
 
-        // === TOOLS ===
-        CURL = "C:\\Program Files\\Git\\usr\\bin\\curl.exe"
-
-        // === APP CONFIG ===
         AVD_NAME    = "Pixel_4_XL"
         APP_PACKAGE = "com.example.mobileapp"
         APK_DIR     = "apk-outputs"
 
-        // === MOBSF ===
         MOBSF_URL   = "http://localhost:8000"
         MOBSF_TOKEN = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
     }
 
     stages {
 
-        // ================= CHECKOUT =================
         stage('Checkout Source') {
             steps {
-                echo "Checkout source code"
                 git branch: 'main',
                     url: 'https://github.com/hnnayy/todo.git'
             }
         }
 
-        // ================= PREPARE ==================
         stage('Prepare Workspace') {
             steps {
                 bat "if not exist ${APK_DIR} mkdir ${APK_DIR}"
             }
         }
 
-        // ================= BUILD ====================
         stage('Build APK') {
             steps {
-                echo "Building Flutter APK"
                 bat "flutter pub get"
                 bat "flutter build apk --debug"
                 bat "dir build\\app\\outputs\\flutter-apk"
             }
         }
 
-        // ================= SAST =====================
+        // ======================= SAST ==========================
         stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
@@ -78,7 +67,7 @@ pipeline {
 
                     def uploadResp = bat(
                         script: """
-                        "${env.CURL}" -s ^
+                        call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s ^
                           -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/upload
@@ -94,15 +83,15 @@ pipeline {
                     echo "APK HASH: ${env.APK_HASH}"
 
                     bat """
-                        "${env.CURL}" -s -X POST ^
-                          -d "hash=${env.APK_HASH}" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/scan
+                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                      -d "hash=${env.APK_HASH}" ^
+                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                      ${env.MOBSF_URL}/api/v1/scan
                     """
 
                     def rawReport = bat(
                         script: """
-                        "${env.CURL}" -s -X POST ^
+                        call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/report_json
@@ -120,7 +109,7 @@ pipeline {
             }
         }
 
-        // ================= EMULATOR =================
+        // ===================== EMULATOR ========================
         stage('Start Emulator') {
             steps {
                 script {
@@ -148,43 +137,40 @@ pipeline {
             }
         }
 
-        // ================= DAST =====================
+        // ======================= DAST ==========================
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
-                    echo "Starting DAST analysis"
-
                     bat "adb shell input keyevent 82"
-                    sleep 2
 
                     bat """
-                        "${env.CURL}" -s -X POST ^
-                          -d "hash=${env.APK_HASH}" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
+                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                      -d "hash=${env.APK_HASH}" ^
+                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                      ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
                     """
 
                     sleep 25
 
                     bat """
-                        "${env.CURL}" -s -X POST ^
-                          -d "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/frida/instrument
+                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                      -d "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass" ^
+                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                      ${env.MOBSF_URL}/api/v1/frida/instrument
                     """
 
                     bat "adb shell monkey -p ${APP_PACKAGE} --throttle 300 -v 300"
 
                     bat """
-                        "${env.CURL}" -s -X POST ^
-                          -d "hash=${env.APK_HASH}" ^
-                          -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                          ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
+                    call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
+                      -d "hash=${env.APK_HASH}" ^
+                      -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                      ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
 
                     def raw = bat(
                         script: """
-                        "${env.CURL}" -s -X POST ^
+                        call C:\\Program^ Files\\Git\\usr\\bin\\curl.exe -s -X POST ^
                           -d "hash=${env.APK_HASH}" ^
                           -H "Authorization: ${env.MOBSF_TOKEN}" ^
                           ${env.MOBSF_URL}/api/v1/dynamic/report_json
@@ -202,7 +188,6 @@ pipeline {
             }
         }
 
-        // ================= CLEANUP ==================
         stage('Cleanup') {
             steps {
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || exit 0'
