@@ -46,6 +46,7 @@ pipeline {
             steps {
                 bat "flutter pub get"
                 bat "flutter build apk --debug"
+                bat "dir build\\app\\outputs\\flutter-apk"
             }
         }
 
@@ -53,11 +54,11 @@ pipeline {
         stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
-                    echo "Uploading APK to MobSF"
+                    echo "Uploading APK to MobSF (SAST)"
 
                     def uploadResp = bat(
                         script: """
-                        "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s ^
+                        curl -s ^
                         -F "file=@build/app/outputs/flutter-apk/app-debug.apk" ^
                         -H "Authorization: ${MOBSF_TOKEN}" ^
                         ${MOBSF_URL}/api/v1/upload
@@ -70,8 +71,10 @@ pipeline {
                         error "MobSF upload failed — hash not returned"
                     }
 
+                    echo "APK HASH: ${env.APK_HASH}"
+
                     bat """
-                    "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                    curl -s -X POST ^
                     -d "hash=${env.APK_HASH}" ^
                     -H "Authorization: ${MOBSF_TOKEN}" ^
                     ${MOBSF_URL}/api/v1/scan
@@ -79,7 +82,7 @@ pipeline {
 
                     def rawReport = bat(
                         script: """
-                        "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                        curl -s -X POST ^
                         -d "hash=${env.APK_HASH}" ^
                         -H "Authorization: ${MOBSF_TOKEN}" ^
                         ${MOBSF_URL}/api/v1/report_json
@@ -124,8 +127,10 @@ pipeline {
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
+                    bat "adb shell input keyevent 82"
+
                     bat """
-                    "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                    curl -s -X POST ^
                     -d "hash=${env.APK_HASH}" ^
                     -H "Authorization: ${MOBSF_TOKEN}" ^
                     ${MOBSF_URL}/api/v1/dynamic/start_analysis
@@ -134,7 +139,7 @@ pipeline {
                     sleep 30
 
                     bat """
-                    "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                    curl -s -X POST ^
                     -d "hash=${env.APK_HASH}" ^
                     -H "Authorization: ${MOBSF_TOKEN}" ^
                     ${MOBSF_URL}/api/v1/dynamic/stop_analysis
@@ -142,7 +147,7 @@ pipeline {
 
                     def raw = bat(
                         script: """
-                        "C:\\Program Files\\Git\\usr\\bin\\curl.exe" -s -X POST ^
+                        curl -s -X POST ^
                         -d "hash=${env.APK_HASH}" ^
                         -H "Authorization: ${MOBSF_TOKEN}" ^
                         ${MOBSF_URL}/api/v1/dynamic/report_json
