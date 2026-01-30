@@ -4,7 +4,6 @@ import groovy.json.JsonSlurperClassic
 
 @NonCPS
 def extractHashFromResponse(String response) {
-    // Mengekstrak hash unik dari response JSON upload [cite: 84]
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
     if (matcher.find()) {
         return matcher.group(1)
@@ -14,7 +13,6 @@ def extractHashFromResponse(String response) {
 
 @NonCPS
 def cleanJsonString(String rawOutput) {
-    // Membersihkan output agar menjadi format JSON yang valid untuk disimpan [cite: 83, 105]
     int firstBrace = rawOutput.indexOf('{')
     int lastBrace = rawOutput.lastIndexOf('}')
     if (firstBrace == -1 || lastBrace == -1) { return null }
@@ -26,6 +24,7 @@ def cleanJsonString(String rawOutput) {
 pipeline {
     agent any
 
+    // [MODIFIKASI] Menambahkan Parameter Pilihan
     parameters {
         choice(name: 'BUILD_TYPE', choices: ['release', 'debug'], description: 'Pilih Tipe Build (Gunakan Release untuk hasil audit yang akurat)')
     }
@@ -36,8 +35,6 @@ pipeline {
         AVD_NAME = "Pixel_4_XL_2"
         APP_PACKAGE = "com.example.mobileapp" 
         APK_OUTPUT_DIR = "C:\\ApksGenerated"
-        // API Key sesuai lampiran dokumentasi [cite: 4]
-        API_KEY = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
     }
 
     stages {
@@ -57,7 +54,7 @@ pipeline {
             }
         }
 
-        stage('Clean Folder APK') {
+        stage('Clean Folder C:\\ApksGenerated') {
             steps {
                 echo "Cleaning ${env.APK_OUTPUT_DIR} folder."
                 bat "del /Q \"${env.APK_OUTPUT_DIR}\\*\""
@@ -69,37 +66,41 @@ pipeline {
                 echo "Starting Build Application stage (Mode: ${params.BUILD_TYPE})"
                 bat 'git config --global --add safe.directory C:/flutter'
                 bat 'flutter pub get'
+                // [MODIFIKASI] Command build dinamis sesuai parameter
                 bat "flutter build apk --${params.BUILD_TYPE}"
             }
         }
 
-        stage('MobSF - Static Analysis') {
+        // --- SAST STAGE ---
+        stage('SAST Mobile') {
             steps {
                 script {
-                    echo 'Running SAST Mobile...'
+                    echo 'Running SAST...'
+                    
+                    // [MODIFIKASI] Path file dinamis (app-release.apk atau app-debug.apk)
                     def apkSourcePath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
                     
-                    // 1. API: Upload a File [cite: 73, 75]
-                    echo "Uploading APK to MobSF..."
-                    def uploadRes = bat(script: "@curl -s -F \"file=@${apkSourcePath}\" http://localhost:8000/api/v1/upload -H \"Authorization: ${env.API_KEY}\"", returnStdout: true).trim()
-                    env.APK_HASH = extractHashFromResponse(uploadRes)
+                    // Upload ke MobSF [cite: 75, 77]
+                    def uploadResponse = bat(script: "@curl -s -F \"file=@${apkSourcePath}\" http://localhost:8000/api/v1/upload -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    String apkHash = extractHashFromResponse(uploadResponse)
                     
-                    if (env.APK_HASH == "") { error "Upload Gagal! Periksa koneksi ke MobSF." }
-                    echo "APK Hash: ${env.APK_HASH}"
+                    if (apkHash == "") { error "Upload failed." }
+                    env.APK_HASH = apkHash
+                    echo "SAST Hash: ${apkHash}"
 
-                    // 2. API: Scan a File [cite: 96, 98]
-                    echo "Initiating Static Scan..."
-                    bat "@curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.API_KEY}\""
+                    // Scan [cite: 98, 100]
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
+                    // Get Report [cite: 261, 263]
+                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
-                    // 3. API: Generate JSON Report [cite: 259, 261]
-                    echo "Downloading Static Analysis JSON Report..."
-                    def staticReport = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.API_KEY}\"", returnStdout: true).trim()
-                    writeFile file: 'static_report.json', text: cleanJsonString(staticReport)
-
-                    // 4. API: Display Recent Scans [cite: 311, 313]
-                    echo "Fetching Recent Scans list..."
-                    def recent = bat(script: "@curl -s -G http://localhost:8000/api/v1/scans --data-urlencode \"page=1\" --data-urlencode \"page_size=5\" -H \"Authorization: ${env.API_KEY}\"", returnStdout: true).trim()
-                    writeFile file: 'recent_scans.json', text: cleanJsonString(recent)
+                    String jsonString = cleanJsonString(rawOutput)
+                    if (jsonString != null) {
+                        writeFile file: 'sast_report.json', text: jsonString
+                        echo "SAST JSON Report saved."
+                        echo "✅ SAST Report URL: http://localhost:8000/static_analyzer/${apkHash}/"
+                    }
+                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: true
                 }
             }
         }
@@ -109,67 +110,146 @@ pipeline {
                 script {
                     def devices = bat(script: "adb devices", returnStdout: true)
                     if (!devices.contains("emulator")) {
-                        echo "Starting Android Emulator (${env.AVD_NAME})..."
+                        // [PENTING] -gpu swiftshader_indirect mencegah crash pada Flutter Impeller
+                        echo "Starting emulator with software rendering to prevent Impeller crash..."
                         bat "start /b \"\" \"${env.ANDROID_HOME}\\emulator\\emulator.exe\" -avd \"${env.AVD_NAME}\" -no-window -no-audio -gpu swiftshader_indirect -wipe-data"
                         sleep(time: 60, unit: 'SECONDS')
                         bat "adb wait-for-device"
                     }
+                    sleep(time: 15, unit: 'SECONDS')
                 }
             }
         }
 
-        stage('Install & MobSFy Android') {
+        stage('Install APK') {
             steps {
                 script {
-                    echo "Installing APK to Emulator..."
-                    bat "adb install -r build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
+                    def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
                     
-                    // Unlock Screen
-                    bat "adb shell input keyevent 82"
+                    // [MODIFIKASI] Copy file yang benar (Release/Debug)
+                    def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
+                    def destPath = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
                     
-                    // API: MobSFy runtime environment [cite: 557, 559]
-                    echo "MobSFying the device environment..."
-                    bat "@curl -s -X POST --url http://localhost:8000/api/v1/android/mobsfy --data \"identifier=emulator-5554\" -H \"Authorization: ${env.API_KEY}\""
+                    echo "Copying APK from ${sourcePath} to ${destPath}"
+                    bat "copy \"${sourcePath}\" \"${destPath}\""
+                    
+                    env.APK_PATH = destPath
+                    
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true) 
+                    bat "adb install -r \"${env.APK_PATH}\""
                 }
             }
         }
 
-        stage('MobSF - DAST & Advanced Extraction') {
+        // --- DAST STAGE (HEAVY DUTY) ---
+        stage('DAST Mobile') {
             steps {
                 script {
-                    echo "Starting Dynamic Analysis..."
+                    echo 'Running DAST with Advanced Instrumentation...'
                     
-                    // 5. API: Start Dynamic Analysis [cite: 512, 513]
-                    bat "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.API_KEY}\""
+                    // 1. Force Screen UNLOCK (Mengatasi Injection Failed)
+                    echo "Unlocking screen..."
+                    bat "adb shell input keyevent 82" 
+                    sleep(time: 2, unit: 'SECONDS')
+                    bat "adb shell input keyevent 4" 
                     
-                    echo "Waiting for app to initialize and run interactions..."
-                    sleep(time: 40, unit: 'SECONDS') 
+                    // 2. START Analysis [cite: 513]
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
+                    echo "Waiting 25s for App Launch..."
+                    sleep(time: 25, unit: 'SECONDS') 
 
-                    // 6. API: Dynamic JSON Report (Untuk TRACKERS & BASE64 STRINGS) [cite: 889, 891]
-                    echo "Extracting Trackers and Decoded Base64 Strings..."
-                    def dynamicReport = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.API_KEY}\"", returnStdout: true).trim()
-                    writeFile file: 'trackers_base64_report.json', text: cleanJsonString(dynamicReport)
+                    // 3. ENABLE FRIDA [cite: 724]
+                    echo "Injecting Frida Hooks..."
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/instrument --data \"hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass&auxiliary_hooks=&frida_code=\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true)
+                    
+                    sleep(time: 5, unit: 'SECONDS')
 
-                    // 7. API: View Source - XML FILES Extraction [cite: 910, 913]
-                    echo "Fetching XML/Preferences Files..."
-                    def xmlData = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/view_source --data \"file=data/data/${env.APP_PACKAGE}/shared_prefs/&hash=${env.APK_HASH}&type=xml\" -H \"Authorization: ${env.API_KEY}\"", returnStdout: true).trim()
-                    writeFile file: 'dynamic_xml_files.json', text: cleanJsonString(xmlData)
+                    // 4. INTERACTION PHASE
+                    echo "Starting Hybrid Interaction..."
 
-                    // 8. API: View Source - SQLITE DATABASE Extraction [cite: 910, 913]
-                    echo "Fetching SQLite Database Data..."
-                    def dbData = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/view_source --data \"file=data/data/${env.APP_PACKAGE}/databases/&hash=${env.APK_HASH}&type=db\" -H \"Authorization: ${env.API_KEY}\"", returnStdout: true).trim()
-                    writeFile file: 'dynamic_sqlite_db.json', text: cleanJsonString(dbData)
+                    // A. Logical Input
+                    try {
+                        bat "adb shell input keyevent 61" // Tab
+                        bat "adb shell input text \"TEST\"" 
+                        bat "adb shell input keyevent 66" // Enter
+                    } catch (Exception e) { echo "Input skipped" }
 
-                    // 9. API: Stop Dynamic Analysis [cite: 864, 866]
-                    echo "Stopping Dynamic Analysis..."
-                    bat "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.API_KEY}\""
+                    // [BARU] B. Clipboard Monitor Interaction
+                    echo "Triggering Clipboard Activity..."
+                    bat "adb shell am broadcast -a android.intent.action.PROCESS_TEXT --es android.intent.extra.PROCESS_TEXT 'MobSF_Test_Data'"
+
+                    // C. Monkey Testing (OPTIMIZED FOR SPEED)
+                    echo "Running Monkey (Fast Mode)..."
+                    try {
+                        // [MODIFIKASI] Throttle 1500 (1.5 detik) agar stabil, dan count 200 agar durasi cepat selesai (sekitar 5 menit total)
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 1500 -v 200"
+                    } catch (Exception e) {
+                        echo "Monkey finished."
+                    }
+
+                    sleep(time: 15, unit: 'SECONDS') 
+
+                    // --- [BARU] 5. TLS/SSL SECURITY TEST  ---
+                    echo "Running TLS/SSL Security Tests..."
+                    def tlsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/android/tls_tests --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    
+                    String tlsJson = cleanJsonString(tlsRaw)
+                    if (tlsJson != null) {
+                        writeFile file: 'tls_report.json', text: tlsJson
+                        echo "✅ TLS Report Saved."
+                    }
+
+                    // --- [BARU] 6. RUNTIME DEPENDENCIES  ---
+                    echo "Collecting Runtime Dependencies..."
+                    def depsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/get_dependencies --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    if (depsRaw.contains("ok")) { echo "✅ Runtime Dependencies Captured." }
+
+                    // --- [BARU] 7. GET FRIDA LOGS (RAW)  ---
+                    echo "Fetching Frida Logs..."
+                    def fridaLogsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/logs --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    String fridaLogsJson = cleanJsonString(fridaLogsRaw)
+                    if (fridaLogsJson != null) {
+                        writeFile file: 'frida_logs.json', text: fridaLogsJson
+                        echo "✅ Frida Logs Saved."
+                    }
+
+                    // --- [BARU] 8. GET FRIDA API MONITOR (VIEW)  ---
+                    echo "Fetching Frida API Monitor Data..."
+                    def fridaMonitorRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/api_monitor --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    String fridaMonitorJson = cleanJsonString(fridaMonitorRaw)
+                    if (fridaMonitorJson != null) {
+                        writeFile file: 'frida_monitor.json', text: fridaMonitorJson
+                        echo "✅ Frida API Monitor Saved."
+                    }
+
+                    // 9. STOP Analysis [cite: 866]
+                    bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    // 10. Get JSON Report [cite: 891]
+                    def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+
+                    String jsonString = cleanJsonString(rawOutput)
+                    
+                    if (jsonString != null) {
+                        writeFile file: 'dast_report.json', text: jsonString
+                        echo "DAST JSON Report saved successfully."
+                        echo "✅ DAST Report URL: http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/"
+                    } else {
+                        echo "WARNING: Failed to extract JSON from DAST output."
+                        writeFile file: 'dast_raw.txt', text: rawOutput
+                    }
+
+                    // [BARU] Simpan semua report baru ke Artifacts
+                    archiveArtifacts artifacts: 'dast_report.json, tls_report.json, frida_logs.json, frida_monitor.json', allowEmptyArchive: true
                 }
             }
         }
 
         stage('Cleanup') {
             steps {
-                echo "Stopping Emulator..."
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
             }
         }
@@ -177,21 +257,22 @@ pipeline {
 
     post {
         always {
-            // Mengarsipkan semua hasil ekstraksi JSON sebagai Artifacts
-            archiveArtifacts artifacts: '*.json', allowEmptyArchive: true
-            
-            echo "Sending Security Reports via Email..."
+            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+
+            // [MODIFIKASI] Mengirim Email dengan Lampiran Report Lengkap
             emailext (
-                subject: "Laporan Security Scan Mobile: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
-                to: "mutiahanin2017@gmail.com, gghurl111@gmail.com",
-                body: """<p>Build Selesai. Data keamanan berikut telah berhasil diekstrak secara terpisah:</p>
+                subject: "Laporan Security Scan Mobile App: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
+                body: """<p>Build Selesai. Berikut detail laporan scan keamanan:</p>
+                         <p><strong>Status Build:</strong> ${currentBuild.currentResult}</p>
+                         <hr>
+                         <p><strong>🔗 Link Laporan MobSF (Localhost):</strong></p>
                          <ul>
-                            <li><strong>XML Files:</strong> Terlampir (dynamic_xml_files.json)</li>
-                            <li><strong>SQLite Database:</strong> Terlampir (dynamic_sqlite_db.json)</li>
-                            <li><strong>Trackers & Base64 Strings:</strong> Terlampir (trackers_base64_report.json)</li>
+                           <li><strong>SAST Report (Static):</strong> <a href="http://localhost:8000/static_analyzer/${env.APK_HASH}/">Lihat Laporan SAST</a></li>
+                           <li><strong>DAST Report (Dynamic):</strong> <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Lihat Laporan DAST</a></li>
                          </ul>
-                         <p>Laporan Interaktif: <a href="http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/">Buka MobSF DAST</a></p>""",
-                attachmentsPattern: "*.json"
+                         <p><em>File JSON lengkap (SAST, DAST, TLS Report, Frida Logs, & API Monitor) telah dilampirkan pada email ini.</em></p>""",
+                to: "mutiahanin2017@gmail.com, gghurl111@gmail.com",
+                attachmentsPattern: "**/*.json"
             )
         }
     }
