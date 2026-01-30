@@ -44,9 +44,9 @@ pipeline {
         APP_PACKAGE = "com.example.mobileapp"
         APK_OUTPUT_DIR = "apk-outputs"
 
-        // === MobSF CONFIG ===
+        // ===== MobSF CONFIG (VALID) =====
         MOBSf_URL = "http://localhost:8000"
-        MOBSf_API_KEY = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
+        MOBSf_API_KEY = "8e2a73a972044f782981594b2eefdf86e13e08745853097432943c9bcccd2a52"
     }
 
     stages {
@@ -93,28 +93,22 @@ pipeline {
                         error "APK NOT FOUND: ${apkPath}"
                     }
 
-                    // === UPLOAD APK ===
                     def uploadResponse = bat(
                         script: """
-                        @curl -v -s ^
-                        -F "file=@${apkPath}" ^
+                        @curl -s -F "file=@${apkPath}" ^
                         ${env.MOBSf_URL}/api/v1/upload ^
                         -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                         """,
                         returnStdout: true
                     ).trim()
 
-                    echo "===== RAW UPLOAD RESPONSE ====="
-                    echo uploadResponse
-
                     env.APK_HASH = extractHashFromResponse(uploadResponse)
                     if (!env.APK_HASH) {
                         error "❌ SAST upload failed (hash not returned)"
                     }
 
-                    echo "✅ SAST HASH = ${env.APK_HASH}"
+                    echo "✅ SAST HASH: ${env.APK_HASH}"
 
-                    // === SCAN ===
                     bat """
                     @curl -s -X POST ^
                     ${env.MOBSf_URL}/api/v1/scan ^
@@ -122,7 +116,6 @@ pipeline {
                     -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                     """
 
-                    // === REPORT ===
                     def rawReport = bat(
                         script: """
                         @curl -s -X POST ^
@@ -137,7 +130,8 @@ pipeline {
                     if (json) {
                         writeFile file: 'sast_report.json', text: json
                         archiveArtifacts artifacts: 'sast_report.json'
-                        echo "✅ SAST REPORT: ${env.MOBSf_URL}/static_analyzer/${env.APK_HASH}/"
+                        echo "✅ SAST REPORT:"
+                        echo "${env.MOBSf_URL}/static_analyzer/${env.APK_HASH}/"
                     }
                 }
             }
@@ -184,7 +178,6 @@ pipeline {
                 script {
                     echo "===== DAST START ====="
 
-                    // Unlock screen
                     bat "adb shell input keyevent 82"
                     sleep 2
                     bat "adb shell input keyevent 4"
@@ -199,7 +192,7 @@ pipeline {
 
                     sleep 25
 
-                    // FRIDA INSTRUMENT
+                    // FRIDA
                     bat """
                     @curl -s -X POST ^
                     ${env.MOBSf_URL}/api/v1/frida/instrument ^
@@ -209,7 +202,7 @@ pipeline {
 
                     sleep 5
 
-                    // MONKEY TEST
+                    // MONKEY
                     bat """
                     adb shell monkey -p ${env.APP_PACKAGE} ^
                     --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 ^
@@ -217,6 +210,24 @@ pipeline {
                     """
 
                     sleep 15
+
+                    // TLS TEST (WAJIB)
+                    def tlsRaw = bat(
+                        script: """
+                        @curl -s -X POST ^
+                        ${env.MOBSf_URL}/api/v1/android/tls_tests ^
+                        --data "hash=${env.APK_HASH}" ^
+                        -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    def tlsJson = cleanJsonString(tlsRaw)
+                    if (tlsJson) {
+                        writeFile file: 'tls_report.json', text: tlsJson
+                        archiveArtifacts artifacts: 'tls_report.json'
+                        echo "✅ TLS TEST EXECUTED"
+                    }
 
                     // STOP ANALYSIS
                     bat """
@@ -226,7 +237,6 @@ pipeline {
                     -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                     """
 
-                    // REPORT
                     def raw = bat(
                         script: """
                         @curl -s -X POST ^
@@ -241,7 +251,8 @@ pipeline {
                     if (json) {
                         writeFile file: 'dast_report.json', text: json
                         archiveArtifacts artifacts: 'dast_report.json'
-                        echo "✅ DAST REPORT: ${env.MOBSf_URL}/dynamic_analyzer/${env.APK_HASH}/"
+                        echo "✅ DAST REPORT:"
+                        echo "${env.MOBSf_URL}/dynamic_analyzer/${env.APK_HASH}/"
                     }
                 }
             }
