@@ -80,7 +80,7 @@ pipeline {
                     // [MODIFIKASI] Path file dinamis (app-release.apk atau app-debug.apk)
                     def apkSourcePath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
                     
-                    // Upload ke MobSF
+                    // Upload ke MobSF [cite: 75, 77]
                     def uploadResponse = bat(script: "@curl -s -F \"file=@${apkSourcePath}\" http://localhost:8000/api/v1/upload -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     String apkHash = extractHashFromResponse(uploadResponse)
                     
@@ -88,10 +88,10 @@ pipeline {
                     env.APK_HASH = apkHash
                     echo "SAST Hash: ${apkHash}"
 
-                    // Scan
+                    // Scan [cite: 98, 100]
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/scan --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
-                    // Get Report
+                    // Get Report [cite: 261, 263]
                     def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/report_json --data \"hash=${apkHash}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
                     String jsonString = cleanJsonString(rawOutput)
@@ -153,13 +153,13 @@ pipeline {
                     sleep(time: 2, unit: 'SECONDS')
                     bat "adb shell input keyevent 4" 
                     
-                    // 2. START Analysis
+                    // 2. START Analysis [cite: 513]
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
                     echo "Waiting 25s for App Launch..."
                     sleep(time: 25, unit: 'SECONDS') 
 
-                    // 3. ENABLE FRIDA
+                    // 3. ENABLE FRIDA [cite: 724]
                     echo "Injecting Frida Hooks..."
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/instrument --data \"hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass&auxiliary_hooks=&frida_code=\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true)
                     
@@ -175,7 +175,11 @@ pipeline {
                         bat "adb shell input keyevent 66" // Enter
                     } catch (Exception e) { echo "Input skipped" }
 
-                    // B. Monkey Testing (OPTIMIZED FOR SPEED)
+                    // [BARU] B. Clipboard Monitor Interaction
+                    echo "Triggering Clipboard Activity..."
+                    bat "adb shell am broadcast -a android.intent.action.PROCESS_TEXT --es android.intent.extra.PROCESS_TEXT 'MobSF_Test_Data'"
+
+                    // C. Monkey Testing (OPTIMIZED FOR SPEED)
                     echo "Running Monkey (Fast Mode)..."
                     try {
                         // [MODIFIKASI] Throttle 1500 (1.5 detik) agar stabil, dan count 200 agar durasi cepat selesai (sekitar 5 menit total)
@@ -186,8 +190,7 @@ pipeline {
 
                     sleep(time: 15, unit: 'SECONDS') 
 
-                    // --- [BARU] 5. TLS/SSL SECURITY TEST ---
-                    // Mengambil laporan TLS/SSL Security Tester
+                    // --- [BARU] 5. TLS/SSL SECURITY TEST  ---
                     echo "Running TLS/SSL Security Tests..."
                     def tlsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/android/tls_tests --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
                     
@@ -197,8 +200,12 @@ pipeline {
                         echo "✅ TLS Report Saved."
                     }
 
-                    // --- [BARU] 6. GET FRIDA LOGS (RAW) ---
-                    // Mengambil Frida Log output
+                    // --- [BARU] 6. RUNTIME DEPENDENCIES  ---
+                    echo "Collecting Runtime Dependencies..."
+                    def depsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/get_dependencies --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
+                    if (depsRaw.contains("ok")) { echo "✅ Runtime Dependencies Captured." }
+
+                    // --- [BARU] 7. GET FRIDA LOGS (RAW)  ---
                     echo "Fetching Frida Logs..."
                     def fridaLogsRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/logs --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
@@ -208,8 +215,7 @@ pipeline {
                         echo "✅ Frida Logs Saved."
                     }
 
-                    // --- [BARU] 7. GET FRIDA API MONITOR (VIEW) ---
-                    // Mengambil data API Monitor untuk 'view' yang lebih detail
+                    // --- [BARU] 8. GET FRIDA API MONITOR (VIEW)  ---
                     echo "Fetching Frida API Monitor Data..."
                     def fridaMonitorRaw = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/frida/api_monitor --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
@@ -219,10 +225,10 @@ pipeline {
                         echo "✅ Frida API Monitor Saved."
                     }
 
-                    // 8. STOP Analysis
+                    // 9. STOP Analysis [cite: 866]
                     bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
-                    // 9. Get JSON Report
+                    // 10. Get JSON Report [cite: 891]
                     def rawOutput = bat(script: "@curl -s -X POST --url http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac\"", returnStdout: true).trim()
 
                     String jsonString = cleanJsonString(rawOutput)
