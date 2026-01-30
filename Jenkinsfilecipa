@@ -28,7 +28,7 @@ pipeline {
         choice(
             name: 'BUILD_TYPE',
             choices: ['release', 'debug'],
-            description: 'Gunakan RELEASE untuk hasil MobSF terbaik'
+            description: 'Gunakan RELEASE untuk hasil MobSF paling stabil'
         )
     }
 
@@ -44,6 +44,7 @@ pipeline {
         APP_PACKAGE = "com.example.mobileapp"
         APK_OUTPUT_DIR = "apk-outputs"
 
+        // === MobSF CONFIG ===
         MOBSf_URL = "http://localhost:8000"
         MOBSf_API_KEY = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
     }
@@ -92,13 +93,13 @@ pipeline {
                         error "APK NOT FOUND: ${apkPath}"
                     }
 
-                    // Upload APK
+                    // === UPLOAD APK ===
                     def uploadResponse = bat(
                         script: """
                         @curl -v -s ^
                         -F "file=@${apkPath}" ^
                         ${env.MOBSf_URL}/api/v1/upload ^
-                        -H "Authorization: ${env.MOBSf_API_KEY}"
+                        -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                         """,
                         returnStdout: true
                     ).trim()
@@ -111,23 +112,23 @@ pipeline {
                         error "❌ SAST upload failed (hash not returned)"
                     }
 
-                    echo "SAST HASH = ${env.APK_HASH}"
+                    echo "✅ SAST HASH = ${env.APK_HASH}"
 
-                    // Scan
+                    // === SCAN ===
                     bat """
                     @curl -s -X POST ^
                     ${env.MOBSf_URL}/api/v1/scan ^
                     --data "hash=${env.APK_HASH}" ^
-                    -H "Authorization: ${env.MOBSf_API_KEY}"
+                    -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                     """
 
-                    // Report
+                    // === REPORT ===
                     def rawReport = bat(
                         script: """
                         @curl -s -X POST ^
                         ${env.MOBSf_URL}/api/v1/report_json ^
                         --data "hash=${env.APK_HASH}" ^
-                        -H "Authorization: ${env.MOBSf_API_KEY}"
+                        -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                         """,
                         returnStdout: true
                     ).trim()
@@ -150,7 +151,9 @@ pipeline {
                     bat """
                     start /b "" "${ANDROID_HOME}\\emulator\\emulator.exe" ^
                     -avd ${AVD_NAME} ^
-                    -no-window -no-audio -gpu swiftshader_indirect -wipe-data
+                    -no-window -no-audio ^
+                    -gpu swiftshader_indirect ^
+                    -wipe-data
                     """
                     sleep 60
                     bat "adb wait-for-device"
@@ -181,32 +184,32 @@ pipeline {
                 script {
                     echo "===== DAST START ====="
 
-                    // Unlock
+                    // Unlock screen
                     bat "adb shell input keyevent 82"
                     sleep 2
                     bat "adb shell input keyevent 4"
 
-                    // Start Analysis
+                    // START ANALYSIS
                     bat """
                     @curl -s -X POST ^
                     ${env.MOBSf_URL}/api/v1/dynamic/start_analysis ^
                     --data "hash=${env.APK_HASH}" ^
-                    -H "Authorization: ${env.MOBSf_API_KEY}"
+                    -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                     """
 
                     sleep 25
 
-                    // Frida
+                    // FRIDA INSTRUMENT
                     bat """
                     @curl -s -X POST ^
                     ${env.MOBSf_URL}/api/v1/frida/instrument ^
                     --data "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass" ^
-                    -H "Authorization: ${env.MOBSf_API_KEY}"
+                    -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                     """
 
                     sleep 5
 
-                    // Monkey
+                    // MONKEY TEST
                     bat """
                     adb shell monkey -p ${env.APP_PACKAGE} ^
                     --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 ^
@@ -215,21 +218,21 @@ pipeline {
 
                     sleep 15
 
-                    // Stop Analysis
+                    // STOP ANALYSIS
                     bat """
                     @curl -s -X POST ^
                     ${env.MOBSf_URL}/api/v1/dynamic/stop_analysis ^
                     --data "hash=${env.APK_HASH}" ^
-                    -H "Authorization: ${env.MOBSf_API_KEY}"
+                    -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                     """
 
-                    // Report
+                    // REPORT
                     def raw = bat(
                         script: """
                         @curl -s -X POST ^
                         ${env.MOBSf_URL}/api/v1/dynamic/report_json ^
                         --data "hash=${env.APK_HASH}" ^
-                        -H "Authorization: ${env.MOBSf_API_KEY}"
+                        -H "X-Mobsf-Api-Key: ${env.MOBSf_API_KEY}"
                         """,
                         returnStdout: true
                     ).trim()
