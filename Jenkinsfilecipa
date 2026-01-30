@@ -4,14 +4,19 @@ import groovy.json.JsonSlurperClassic
 @NonCPS
 def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
-    return matcher.find() ? matcher.group(1) : ""
+    if (matcher.find()) {
+        return matcher.group(1)
+    }
+    return ""
 }
 
 @NonCPS
 def cleanJsonString(String rawOutput) {
     int firstBrace = rawOutput.indexOf('{')
     int lastBrace  = rawOutput.lastIndexOf('}')
-    if (firstBrace == -1 || lastBrace == -1) return null
+    if (firstBrace == -1 || lastBrace == -1) {
+        return null
+    }
     return rawOutput.substring(firstBrace, lastBrace + 1)
 }
 
@@ -23,20 +28,20 @@ pipeline {
         choice(
             name: 'BUILD_TYPE',
             choices: ['release', 'debug'],
-            description: 'Gunakan release untuk hasil audit yang lebih akurat'
+            description: 'Pilih Tipe Build (Gunakan Release untuk hasil audit yang akurat)'
         )
     }
 
     environment {
-        ANDROID_HOME     = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
+        ANDROID_HOME = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
         ANDROID_SDK_ROOT = "${ANDROID_HOME}"
-        FLUTTER_HOME     = "D:\\flutter"
-        JAVA_HOME        = "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot"
+        FLUTTER_HOME = "D:\\flutter"
+        JAVA_HOME = "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot"
 
         PATH = "${FLUTTER_HOME}\\bin;${JAVA_HOME}\\bin;${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
 
-        AVD_NAME     = "Pixel_4_XL_2"
-        APP_PACKAGE  = "com.example.mobileapp"
+        AVD_NAME = "Pixel_4_XL_2"
+        APP_PACKAGE = "com.example.mobileapp"
         APK_OUTPUT_DIR = "apk-outputs"
 
         MOBSf_API_KEY = "fe55f4207016d5c6515a1df3b80a710d5d3b40d679462b27e333b004598d75ac"
@@ -47,6 +52,7 @@ pipeline {
         // ================= CHECKOUT =================
         stage('Checkout') {
             steps {
+                echo 'Starting Checkout stage'
                 git branch: 'main',
                     url: 'https://github.com/hnnayy/todo.git'
             }
@@ -59,14 +65,21 @@ pipeline {
             }
         }
 
-        // ================= BUILD =================
-        stage('Build APK') {
+        // ================= CLEAN =================
+        stage('Clean APK Output Folder') {
             steps {
-                bat '''
-                git config --global --add safe.directory "%WORKSPACE%"
-                flutter pub get
-                flutter build apk --%BUILD_TYPE%
-                '''
+                echo "Cleaning APK output folder..."
+                bat 'del /Q apk-outputs\\* || echo Folder already clean'
+            }
+        }
+
+        // ================= BUILD =================
+        stage('Build Application') {
+            steps {
+                echo "Building APK (${params.BUILD_TYPE})"
+                bat 'git config --global --add safe.directory "%WORKSPACE%"'
+                bat 'flutter pub get'
+                bat "flutter build apk --${params.BUILD_TYPE}"
             }
         }
 
@@ -74,34 +87,36 @@ pipeline {
         stage('SAST Mobile') {
             steps {
                 script {
-                    echo "Running SAST..."
+                    echo 'Running SAST...'
 
                     def apkPath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
-                    if (!fileExists(apkPath)) error "APK not found"
 
-                    def upload = bat(
+                    def uploadResponse = bat(
                         script: "@curl -s -F \"file=@${apkPath}\" http://localhost:8000/api/v1/upload -H \"Authorization: ${env.MOBSf_API_KEY}\"",
                         returnStdout: true
                     ).trim()
 
-                    env.APK_HASH = extractHashFromResponse(upload)
-                    if (!env.APK_HASH) error "Upload failed"
+                    env.APK_HASH = extractHashFromResponse(uploadResponse)
+                    if (env.APK_HASH == "") {
+                        error "SAST upload failed"
+                    }
 
-                    echo "SAST HASH: ${env.APK_HASH}"
+                    echo "SAST Hash: ${env.APK_HASH}"
 
                     bat "@curl -s -X POST http://localhost:8000/api/v1/scan --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.MOBSf_API_KEY}\""
 
-                    def raw = bat(
+                    def rawOutput = bat(
                         script: "@curl -s -X POST http://localhost:8000/api/v1/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.MOBSf_API_KEY}\"",
                         returnStdout: true
                     ).trim()
 
-                    def json = cleanJsonString(raw)
-                    if (json) {
-                        writeFile file: 'sast_report.json', text: json
-                        archiveArtifacts artifacts: 'sast_report.json'
-                        echo "✅ SAST Report: http://localhost:8000/static_analyzer/${env.APK_HASH}/"
+                    def jsonString = cleanJsonString(rawOutput)
+                    if (jsonString != null) {
+                        writeFile file: 'sast_report.json', text: jsonString
+                        echo "✅ SAST Report URL: http://localhost:8000/static_analyzer/${env.APK_HASH}/"
                     }
+
+                    archiveArtifacts artifacts: 'sast_report.json', allowEmptyArchive: true
                 }
             }
         }
@@ -110,10 +125,14 @@ pipeline {
         stage('Setup Emulator') {
             steps {
                 script {
-                    bat "adb kill-server"
-                    bat "start /b \"\" \"${ANDROID_HOME}\\emulator\\emulator.exe\" -avd ${AVD_NAME} -no-window -no-audio -gpu swiftshader_indirect -wipe-data"
-                    sleep 60
-                    bat "adb wait-for-device"
+                    def devices = bat(script: "adb devices", returnStdout: true)
+                    if (!devices.contains("emulator")) {
+                        echo "Starting emulator..."
+                        bat "start /b \"\" \"${ANDROID_HOME}\\emulator\\emulator.exe\" -avd \"${AVD_NAME}\" -no-window -no-audio -gpu swiftshader_indirect -wipe-data"
+                        sleep 60
+                        bat "adb wait-for-device"
+                    }
+                    sleep 15
                 }
             }
         }
@@ -124,12 +143,12 @@ pipeline {
                 script {
                     def ts = new Date().format("dd-MM-yyyy_HH-mm-ss")
                     def src = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
-                    def dst = "${APK_OUTPUT_DIR}\\todo-${params.BUILD_TYPE}-${ts}.apk"
+                    def dst = "apk-outputs\\todo-${params.BUILD_TYPE}-${ts}.apk"
 
                     bat "copy \"${src}\" \"${dst}\""
                     env.APK_PATH = dst
 
-                    bat(script: "adb uninstall ${APP_PACKAGE}", returnStatus: true)
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
                     bat "adb install -r \"${env.APK_PATH}\""
                 }
             }
@@ -139,34 +158,41 @@ pipeline {
         stage('DAST Mobile') {
             steps {
                 script {
-                    echo "Running DAST..."
+                    echo 'Running DAST with Advanced Instrumentation...'
 
+                    // Unlock screen
                     bat "adb shell input keyevent 82"
                     sleep 2
                     bat "adb shell input keyevent 4"
 
+                    // Start analysis
                     bat "@curl -s -X POST http://localhost:8000/api/v1/dynamic/start_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.MOBSf_API_KEY}\""
                     sleep 25
 
+                    // Inject Frida
                     bat "@curl -s -X POST http://localhost:8000/api/v1/frida/instrument --data \"hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass\" -H \"Authorization: ${env.MOBSf_API_KEY}\""
                     sleep 5
 
-                    bat "adb shell monkey -p ${APP_PACKAGE} --pct-touch 50 --throttle 1500 -v 200"
-                    sleep 10
+                    // Monkey test
+                    bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --pct-nav 20 --pct-majornav 20 --pct-touch 50 --throttle 1500 -v 200"
+                    sleep 15
 
+                    // Stop analysis
                     bat "@curl -s -X POST http://localhost:8000/api/v1/dynamic/stop_analysis --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.MOBSf_API_KEY}\""
 
-                    def raw = bat(
+                    // Get report
+                    def rawOutput = bat(
                         script: "@curl -s -X POST http://localhost:8000/api/v1/dynamic/report_json --data \"hash=${env.APK_HASH}\" -H \"Authorization: ${env.MOBSf_API_KEY}\"",
                         returnStdout: true
                     ).trim()
 
-                    def json = cleanJsonString(raw)
-                    if (json) {
-                        writeFile file: 'dast_report.json', text: json
-                        archiveArtifacts artifacts: 'dast_report.json'
-                        echo "✅ DAST Report: http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/"
+                    def jsonString = cleanJsonString(rawOutput)
+                    if (jsonString != null) {
+                        writeFile file: 'dast_report.json', text: jsonString
+                        echo "✅ DAST Report URL: http://localhost:8000/dynamic_analyzer/${env.APK_HASH}/"
                     }
+
+                    archiveArtifacts artifacts: 'dast_report.json', allowEmptyArchive: true
                 }
             }
         }
@@ -174,7 +200,7 @@ pipeline {
         // ================= CLEANUP =================
         stage('Cleanup') {
             steps {
-                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator stopped'
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
             }
         }
     }
