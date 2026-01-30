@@ -13,8 +13,9 @@ class Task {
   String id;
   String title;
   bool isCompleted;
+  int status;
 
-  Task({required this.id, required this.title, this.isCompleted = false});
+  Task({required this.id, required this.title, this.isCompleted = false, this.status = 1});
 }
 
 class MainScreen extends StatefulWidget {
@@ -28,15 +29,44 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final List<Task> _tasks = [];
 
+  @override
+  void initState() {
+    super.initState();
+    _fetchTasks();
+  }
+
+  void _fetchTasks() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance.collection('tasks').get();
+      final loadedTasks = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Task(
+          id: doc.id,
+          title: data['title'] ?? '',
+          isCompleted: data['isCompleted'] ?? false,
+          status: data['status'] ?? 1,
+        );
+      }).where((task) => task.status == 1).toList();
+
+      setState(() {
+        _tasks.clear();
+        _tasks.addAll(loadedTasks);
+      });
+    } catch (e) {
+      print("Error fetching tasks: $e");
+    }
+  }
+
   void _addTask(String title) async {
     try {
       final doc = await FirebaseFirestore.instance.collection('tasks').add({
         'title': title,
         'isCompleted': false,
+        'status': 1,
         'createdAt': FieldValue.serverTimestamp(),
       });
       setState(() {
-        _tasks.add(Task(id: doc.id, title: title));
+        _tasks.add(Task(id: doc.id, title: title, status: 1));
       });
     } catch (e) {
       // If Firestore write fails, fallback to local-only add
@@ -44,34 +74,67 @@ class _MainScreenState extends State<MainScreen> {
         _tasks.add(Task(
           id: DateTime.now().toString(),
           title: title,
+          status: 1,
         ));
       });
     }
   }
 
   void _updateTask(String id, String newTitle) {
+    // Optionally update Firestore here too if desired, 
+    // but focusing on status/delete per request.
+    try {
+       FirebaseFirestore.instance.collection('tasks').doc(id).update({'title': newTitle});
+    } catch (_) {}
+
     setState(() {
       final task = _tasks.firstWhere((task) => task.id == id);
       task.title = newTitle;
     });
   }
 
-  void _deleteTask(String id) {
+  void _deleteTask(String id) async {
+    try {
+      // Soft delete: update status to 2
+      await FirebaseFirestore.instance.collection('tasks').doc(id).update({'status': 2});
+    } catch (e) {
+      print("Error soft deleting task: $e");
+    }
     setState(() {
+      // Remove from UI since we only show status 1
       _tasks.removeWhere((task) => task.id == id);
     });
   }
 
-  void _deleteAllTasks() {
+  void _deleteAllTasks() async {
+    // Soft delete all currently visible tasks
+    final batch = FirebaseFirestore.instance.batch();
+    for (var task in _tasks) {
+      final docRef = FirebaseFirestore.instance.collection('tasks').doc(task.id);
+      batch.update(docRef, {'status': 2});
+    }
+    
+    try {
+      await batch.commit();
+    } catch(e) {
+      print("Error batch deleting: $e");
+    }
+
     setState(() {
       _tasks.clear();
     });
   }
 
   void _toggleTask(String id) {
+    final task = _tasks.firstWhere((task) => task.id == id);
+    final newState = !task.isCompleted;
+
+    try {
+       FirebaseFirestore.instance.collection('tasks').doc(id).update({'isCompleted': newState});
+    } catch (_) {}
+
     setState(() {
-      final task = _tasks.firstWhere((task) => task.id == id);
-      task.isCompleted = !task.isCompleted;
+      task.isCompleted = newState;
     });
   }
 
