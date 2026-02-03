@@ -37,7 +37,7 @@ pipeline {
 
         PATH = "${FLUTTER_HOME}\\bin;${JAVA_HOME}\\bin;${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
 
-        AVD_NAME    = "Pixel_4_XL_2"
+        AVD_NAME    = "Pixel_4_XL"
         APP_PACKAGE = "com.example.mobileapp"
 
         APK_OUTPUT_DIR = "apk-outputs"
