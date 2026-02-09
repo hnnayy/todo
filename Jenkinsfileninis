@@ -248,4 +248,56 @@ pipeline {
             }
         }
     }
+
+    post {
+    always {
+
+        // Arsipkan APK hasil build
+        archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+
+        // Arsipkan semua report JSON (SAST, DAST, TLS)
+        archiveArtifacts artifacts: '**/*_report.json', allowEmptyArchive: true
+
+        // Kirim Email Report
+        emailext (
+            subject: "Laporan Security Scan Mobile App - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            mimeType: 'text/html',
+            body: """
+                <p><strong>Build & Security Scan Selesai</strong></p>
+
+                <p><strong>Status Build:</strong> ${currentBuild.currentResult}</p>
+                <p><strong>Build Number:</strong> #${env.BUILD_NUMBER}</p>
+                <p><strong>Build Type:</strong> ${params.BUILD_TYPE}</p>
+
+                <hr>
+
+                <p><strong>🔗 Link Laporan MobSF (Localhost)</strong></p>
+                <ul>
+                    <li>
+                        <strong>SAST (Static Analysis):</strong>
+                        <a href="${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/">
+                            Lihat Laporan SAST
+                        </a>
+                    </li>
+                    <li>
+                        <strong>DAST (Dynamic Analysis):</strong>
+                        <a href="${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/">
+                            Lihat Laporan DAST
+                        </a>
+                    </li>
+                </ul>
+
+                <p>
+                    <em>
+                        File JSON lengkap (SAST, DAST, TLS Report) telah dilampirkan
+                        sebagai attachment email ini.
+                    </em>
+                </p>
+            """,
+            to: "mutiahanin2017@gmail.com, gghurl111@gmail.com, sutrawberry12@gmail.com",
+            attachmentsPattern: "**/*.json"
+        )
+    }
+}
+
 }
