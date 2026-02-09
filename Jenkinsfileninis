@@ -265,53 +265,38 @@ pipeline {
                 // ================= EMAIL =================
                 try {
                     emailext(
+                        from: 'sutrawberry12@gmail.com',
+                        to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
                         subject: "Laporan Security Scan Mobile App - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                         mimeType: 'text/html',
-                        to: "mutiahanin2017@gmail.com, gghurl111@gmail.com, sutrawberry12@gmail.com",
-                        attachmentsPattern: '**/*_report.json',
                         body: """
-                            <h2>✅ Build & Security Scan Selesai</h2>
+                            <h3>Build & Security Scan Selesai</h3>
 
-                            <p><strong>Status Build:</strong> ${currentBuild.currentResult}</p>
-                            <p><strong>Job:</strong> ${env.JOB_NAME}</p>
-                            <p><strong>Build Number:</strong> #${env.BUILD_NUMBER}</p>
-                            <p><strong>Build Type:</strong> ${params.BUILD_TYPE}</p>
+                            <p><b>Status:</b> ${currentBuild.currentResult}</p>
+                            <p><b>Build #:</b> ${env.BUILD_NUMBER}</p>
+                            <p><b>Build Type:</b> ${params.BUILD_TYPE}</p>
 
                             <hr>
 
-                            <h3>🔍 MobSF Security Reports</h3>
+                            <p><b>MobSF Report:</b></p>
                             <ul>
                                 <li>
-                                    <strong>SAST (Static Analysis):</strong><br>
-                                    <a href="${env.MOBSF_URL}/static_analyzer/${safeHash}/">
-                                        ${env.MOBSF_URL}/static_analyzer/${safeHash}/
+                                    <a href="${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/">
+                                        SAST Report
                                     </a>
                                 </li>
                                 <li>
-                                    <strong>DAST (Dynamic Analysis):</strong><br>
-                                    <a href="${env.MOBSF_URL}/dynamic_analyzer/${safeHash}/">
-                                        ${env.MOBSF_URL}/dynamic_analyzer/${safeHash}/
+                                    <a href="${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/">
+                                        DAST Report
                                     </a>
                                 </li>
                             </ul>
 
-                            <hr>
-
-                            <p>
-                                <em>
-                                    File JSON hasil scanning (SAST, DAST, TLS)
-                                    terlampir sebagai attachment email ini.
-                                </em>
-                            </p>
-
-                            <p>
-                                Jenkins URL:<br>
-                                <a href="${env.BUILD_URL}">
-                                    ${env.BUILD_URL}
-                                </a>
-                            </p>
-                        """
+                            <p><i>File JSON terlampir.</i></p>
+                        """,
+                        attachmentsPattern: "**/*_report.json"
                     )
+
 
                     echo "📧 Email notification sent successfully."
                 } catch (err) {
