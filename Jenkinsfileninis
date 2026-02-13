@@ -246,10 +246,15 @@ pipeline {
 
     post {
         always {
+
             archiveArtifacts artifacts: 'apk-outputs/*.apk, **/*.json', allowEmptyArchive: true
 
-            // Zip semua report
-            zip zipFile: 'security_reports.zip', archive: true, glob: '**/*.json'
+            // ZIP semua file JSON pakai PowerShell
+            bat """
+            powershell -Command "Compress-Archive -Path *.json -DestinationPath security_reports.zip -Force"
+            """
+
+            archiveArtifacts artifacts: 'security_reports.zip', allowEmptyArchive: true
 
             mail(
                 to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
@@ -264,6 +269,7 @@ pipeline {
             )
         }
     }
+
 
 
 
