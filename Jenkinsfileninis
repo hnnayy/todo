@@ -246,41 +246,25 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'apk-outputs/*.apk, **/*.json', allowEmptyArchive: true
 
-            script {
-                // Convert JSON ke PDF sederhana (ringkasan)
-                def pdfContent = """
-    Security Scan Report
+            // Zip semua report
+            zip zipFile: 'security_reports.zip', archive: true, glob: '**/*.json'
 
-    Job Name   : ${env.JOB_NAME}
-    Build No   : ${env.BUILD_NUMBER}
-    Status     : ${currentBuild.currentResult}
-
-    File JSON lengkap terlampir:
-    - sast_report.json
-    - dast_report.json
-    - tls_report.json
-    """
-
-                writeFile file: "security_summary.txt", text: pdfContent
-            }
-
-            emailext(
-                from: 'sutrawberry12@gmail.com',
+            mail(
                 to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
-                subject: "Laporan Security Scan Mobile App: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
-                mimeType: 'text/html',
+                subject: "Security Scan - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                 body: """
-                <h3>Security Scan Report</h3>
-                <p><strong>Status:</strong> ${currentBuild.currentResult}</p>
-                <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
-                <p>Laporan lengkap terlampir dalam bentuk JSON.</p>
-                """,
-                attachmentsPattern: "**/*.json, security_summary.txt"
+    Build Status: ${currentBuild.currentResult}
+
+    Report bisa di-download di Jenkins Artifact:
+
+    ${env.BUILD_URL}artifact/security_reports.zip
+    """
             )
         }
     }
+
 
 
 }
