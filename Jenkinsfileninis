@@ -269,7 +269,6 @@ pipeline {
             emailext(
                 from: 'sutrawberry12@gmail.com',
                 to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
-                recipientProviders: [],
                 subject: "Laporan Security Scan Mobile App: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
                 mimeType: 'text/html',
                 body: """
