@@ -169,11 +169,9 @@ pipeline {
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
-                    // Unlock screen
                     bat "adb shell input keyevent 82"
                     sleep 2
 
-                    // Start analysis
                     bat """
                     @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
@@ -183,7 +181,6 @@ pipeline {
 
                     sleep 25
 
-                    // Frida Instrumentation
                     bat """
                     @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
@@ -191,14 +188,12 @@ pipeline {
                     ${env.MOBSF_URL}/api/v1/frida/instrument
                     """
 
-                    // Monkey testing
                     try {
                         bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --throttle 1500 -v 200"
                     } catch (Exception e) {
                         echo "Monkey finished."
                     }
 
-                    // TLS Tests
                     def tlsRaw = bat(
                         script: """
                         @curl -s -X POST ^
@@ -210,9 +205,10 @@ pipeline {
                     ).trim()
 
                     def tlsJson = cleanJsonString(tlsRaw)
-                    if (tlsJson) writeFile file: 'tls_report.json', text: tlsJson
+                    if (tlsJson) {
+                        writeFile file: 'tls_report.json', text: tlsJson
+                    }
 
-                    // Stop analysis
                     bat """
                     @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
@@ -220,7 +216,6 @@ pipeline {
                     ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
 
-                    // Get DAST report
                     def raw = bat(
                         script: """
                         @curl -s -X POST ^
@@ -251,62 +246,15 @@ pipeline {
 
     post {
         always {
-
-            script {
-                echo "Preparing artifacts & email notification..."
-
-                // ================= SAFE FALLBACK =================
-                def safeHash = env.APK_HASH ?: "N/A"
-
-                // ================= ARCHIVE =================
-                archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-                archiveArtifacts artifacts: '**/*_report.json', allowEmptyArchive: true
-
-                // ================= EMAIL =================
-                try {
-                    emailext(
-                        from: 'sutrawberry12@gmail.com',
-                        to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
-                        recipientProviders: [],
-                        subject: "Laporan Security Scan Mobile App - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        mimeType: 'text/html',
-                        body: """
-                            <h3>Build & Security Scan Selesai</h3>
-
-                            <p><b>Status:</b> ${currentBuild.currentResult}</p>
-                            <p><b>Build #:</b> ${env.BUILD_NUMBER}</p>
-                            <p><b>Build Type:</b> ${params.BUILD_TYPE}</p>
-
-                            <hr>
-
-                            <p><b>MobSF Report:</b></p>
-                            <ul>
-                                <li>
-                                    <a href="${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/">
-                                        SAST Report
-                                    </a>
-                                </li>
-                                <li>
-                                    <a href="${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/">
-                                        DAST Report
-                                    </a>
-                                </li>
-                            </ul>
-
-                            <p><i>File JSON terlampir.</i></p>
-                        """,
-                        attachmentsPattern: "**/*_report.json"
-                    )
-
-
-                    echo "📧 Email notification sent successfully."
-                } catch (err) {
-                    echo "⚠️ Email notification failed, but build will not fail."
-                    echo err.toString()
-                }
-            }
+            mail(
+                to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
+                subject: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+Build Status: ${currentBuild.currentResult}
+Job: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+"""
+            )
         }
     }
-
-
 }
