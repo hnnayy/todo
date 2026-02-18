@@ -198,64 +198,65 @@ pipeline {
 
 post {
     always {
-
-        archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-
         script {
-            if (env.APK_HASH) {
+            try {
 
-                echo "Waiting before downloading PDF..."
-                sleep 20
+                echo "Uploading reports to Google Drive..."
 
-                echo "Downloading SAST PDF..."
-                bat """
-                @curl -s -X POST ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                --data "hash=${env.APK_HASH}" ^
-                -o sast_report.pdf ^
-                ${env.MOBSF_URL}/api/v1/download_pdf
-                """
+                // Upload PDF ke folder JenkinsReports
+                bat 'rclone copy sast_report.pdf gdrive:JenkinsReports'
+                bat 'rclone copy dast_report.pdf gdrive:JenkinsReports'
 
-                echo "Downloading DAST PDF..."
-                bat """
-                @curl -s -X POST ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                --data "hash=${env.APK_HASH}" ^
-                -o dast_report.pdf ^
-                ${env.MOBSF_URL}/api/v1/download_dynamic_pdf
-                """
+                // Ambil public link
+                def sastLink = bat(
+                    script: 'rclone link gdrive:JenkinsReports/sast_report.pdf',
+                    returnStdout: true
+                ).trim()
 
-                echo "Checking downloaded files..."
-                bat "dir sast_report.pdf"
-                bat "dir dast_report.pdf"
+                def dastLink = bat(
+                    script: 'rclone link gdrive:JenkinsReports/dast_report.pdf',
+                    returnStdout: true
+                ).trim()
 
-            } else {
-                echo "APK_HASH not found. Skipping PDF download."
+                echo "SAST Link: ${sastLink}"
+                echo "DAST Link: ${dastLink}"
+
+                // Kirim email pakai link
+                emailext(
+                    subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
+                    body: """Halo tim!
+
+Build pipeline selesai dengan status: ${currentBuild.currentResult}.
+
+Laporan tersedia melalui Google Drive:
+
+🔹 SAST Report:
+${sastLink}
+
+🔹 DAST Report:
+${dastLink}
+
+Silakan klik link di atas untuk mengunduh report.
+
+Terima kasih.
+Dikirim otomatis dari Jenkins.
+""",
+                    mimeType: 'text/plain',
+                    to: '$DEFAULT_RECIPIENTS',
+                    attachLog: true,
+                    compressLog: true,
+                    recipientProviders: []
+                )
+
+                echo "Email dengan link Google Drive berhasil dicoba kirim."
+
+            } catch (Exception e) {
+                echo "Gagal upload atau kirim email: ${e.getMessage()}"
             }
         }
-
-        archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-
-        echo "Sending email with attachments..."
-
-emailext(
-    subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-    body: """
-Build Status: ${currentBuild.currentResult}
-
-SAST dan DAST report terlampir.
-""",
-    mimeType: 'text/plain',
-    to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-    recipientProviders: [],
-    attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
-    attachLog: false
-)
-
-
-        echo "Email step executed."
     }
 }
+
 
 
 }
