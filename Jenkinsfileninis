@@ -270,7 +270,7 @@ pipeline {
                     -o dast_report.pdf
                     """
 
-                     // Validasi ukuran file
+                    // Validasi ukuran file
                     bat """
                     for %%F in (sast_report.pdf dast_report.pdf) do (
                         if %%~zF LSS 5000 (
@@ -278,6 +278,8 @@ pipeline {
                             del %%F
                         )
                     )
+                    """
+
 
                 } else {
                     echo "APK_HASH not found. Skipping PDF download."
