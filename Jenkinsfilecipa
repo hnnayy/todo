@@ -239,25 +239,19 @@ post {
         echo "Sending email with attachments..."
 
 emailext(
-    subject: "Mobile Security Scan Result - Build #${env.BUILD_NUMBER}",
+    subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
     body: """
-Mobile Security Scan Completed
+Build Status: ${currentBuild.currentResult}
 
-Job: ${env.JOB_NAME}
-Build: #${env.BUILD_NUMBER}
-Status: ${currentBuild.currentResult}
-
-SAST and DAST reports attached.
+SAST dan DAST report terlampir.
 """,
     mimeType: 'text/plain',
-    to: '',
-    recipientProviders: [
-        [$class: 'DevelopersRecipientProvider'],
-        [$class: 'RequesterRecipientProvider']
-    ],
-    attachmentsPattern: '*.pdf',
+    to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
+    recipientProviders: [],
+    attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
     attachLog: false
 )
+
 
         echo "Email step executed."
     }
