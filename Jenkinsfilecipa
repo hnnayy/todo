@@ -205,28 +205,29 @@ post {
             if (env.APK_HASH) {
 
                 echo "Waiting before downloading PDF..."
-                sleep 15
+                sleep 20
 
-echo "Downloading SAST PDF..."
-bat """
-@curl -s -X POST ^
--H "Authorization: ${env.MOBSF_TOKEN}" ^
---data "hash=${env.APK_HASH}" ^
--o sast_report.pdf ^
-${env.MOBSF_URL}/api/v1/download_pdf
-"""
+                echo "Downloading SAST PDF..."
+                bat """
+                @curl -s -X POST ^
+                -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                --data "hash=${env.APK_HASH}" ^
+                -o sast_report.pdf ^
+                ${env.MOBSF_URL}/api/v1/download_pdf
+                """
 
-echo "Downloading DAST PDF..."
-bat """
-@curl -s -X POST ^
--H "Authorization: ${env.MOBSF_TOKEN}" ^
---data "hash=${env.APK_HASH}" ^
--o dast_report.pdf ^
-${env.MOBSF_URL}/api/v1/download_dynamic_pdf
-"""
+                echo "Downloading DAST PDF..."
+                bat """
+                @curl -s -X POST ^
+                -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                --data "hash=${env.APK_HASH}" ^
+                -o dast_report.pdf ^
+                ${env.MOBSF_URL}/api/v1/download_dynamic_pdf
+                """
+
+                echo "Checking downloaded files..."
                 bat "dir sast_report.pdf"
                 bat "dir dast_report.pdf"
-
 
             } else {
                 echo "APK_HASH not found. Skipping PDF download."
@@ -235,18 +236,30 @@ ${env.MOBSF_URL}/api/v1/download_dynamic_pdf
 
         archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-        emailext(
-            subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-            body: """
-Build Status: ${currentBuild.currentResult}
+        echo "Sending email with attachments..."
 
-Laporan SAST dan DAST terlampir dalam email ini.
+        emailext(
+            subject: "Mobile Security Scan Result - Build #${env.BUILD_NUMBER}",
+            body: """
+<h3>Mobile Security Scan Completed</h3>
+
+<p><b>Job:</b> ${env.JOB_NAME}</p>
+<p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
+<p><b>Status:</b> ${currentBuild.currentResult}</p>
+
+<p>SAST and DAST reports are attached in this email.</p>
+
+<p>Regards,<br/>Jenkins CI</p>
 """,
+            mimeType: 'text/html',
             to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-            attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
+            attachmentsPattern: '*.pdf',
             attachLog: false
         )
+
+        echo "Email step executed."
     }
 }
+
 
 }
