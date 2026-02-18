@@ -201,46 +201,30 @@ pipeline {
 
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-            script {
-                if (env.APK_HASH) {
+script {
+    if (env.APK_HASH) {
 
-                    // ===== SAFE PDF DOWNLOAD =====
-                    def sastCheck = bat(
-                        script: """
-                        @curl -s -X POST ^
-                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                        --data "hash=${env.APK_HASH}" ^
-                        ${env.MOBSF_URL}/api/v1/download_pdf
-                        """,
-                        returnStdout: true
-                    )
+        echo "Downloading SAST PDF..."
 
-                    if (sastCheck.contains("%PDF")) {
-                        writeFile file: 'sast_report.pdf', text: sastCheck
-                    } else {
-                        echo "SAST PDF invalid — response was not PDF."
-                    }
+        bat """
+        @curl -L -o sast_report.pdf ^
+        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+        "${env.MOBSF_URL}/api/v1/download_pdf?hash=${env.APK_HASH}"
+        """
 
-                    def dastCheck = bat(
-                        script: """
-                        @curl -s -X POST ^
-                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                        --data "hash=${env.APK_HASH}" ^
-                        ${env.MOBSF_URL}/api/v1/download_dynamic_pdf
-                        """,
-                        returnStdout: true
-                    )
+        echo "Downloading DAST PDF..."
 
-                    if (dastCheck.contains("%PDF")) {
-                        writeFile file: 'dast_report.pdf', text: dastCheck
-                    } else {
-                        echo "DAST PDF invalid — response was not PDF."
-                    }
+        bat """
+        @curl -L -o dast_report.pdf ^
+        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+        "${env.MOBSF_URL}/api/v1/download_dynamic_pdf?hash=${env.APK_HASH}"
+        """
 
-                } else {
-                    echo "APK_HASH not found. Skipping PDF download."
-                }
-            }
+    } else {
+        echo "APK_HASH not found. Skipping PDF download."
+    }
+}
+
 
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
