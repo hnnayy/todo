@@ -252,6 +252,8 @@ pipeline {
             script {
                 if (env.APK_HASH) {
 
+                    sleep 20
+
                     bat """
                     @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
@@ -268,6 +270,17 @@ pipeline {
                     -o dast_report.pdf
                     """
 
+                    // Validasi ukuran file
+                    bat """
+                    for %%F in (sast_report.pdf dast_report.pdf) do (
+                        if %%~zF LSS 5000 (
+                            echo File %%F terlalu kecil, kemungkinan error.
+                            del %%F
+                        )
+                    )
+                    """
+
+
                 } else {
                     echo "APK_HASH not found. Skipping PDF download."
                 }
@@ -276,19 +289,15 @@ pipeline {
 
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-            mail(
-                to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-                subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-    Build Status: ${currentBuild.currentResult}
-
-    Laporan PDF terlampir sebagai artifact Jenkins.
-
-    Download di:
-    ${env.BUILD_URL}artifact/sast_report.pdf
-    ${env.BUILD_URL}artifact/dast_report.pdf
-    """
+            emailext(
+                subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
+                body: "Build Status: ${currentBuild.currentResult}\n\nLaporan SAST & DAST terlampir.\n\nProject: ${env.JOB_NAME}\nBuild Number: ${env.BUILD_NUMBER}",
+                to: "mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com",
+                attachmentsPattern: "*.pdf",
+                mimeType: 'text/plain'
             )
+
+
         }
     }
 
