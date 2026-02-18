@@ -246,18 +246,18 @@ pipeline {
 
     post {
         always {
-
-            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-
-            emailext(
-                to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
-                subject: 'FINAL TEST',
-                body: 'Test',
-                mimeType: 'text/plain'
-            )
+            script {
+                emailext(
+                    to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
+                    subject: 'FINAL TEST',
+                    body: 'Test',
+                    mimeType: 'text/plain',
+                    recipientProviders: []
+                )
+            }
         }
     }
+
 
 
 
