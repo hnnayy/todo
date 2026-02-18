@@ -251,7 +251,6 @@ pipeline {
     post {
         always {
             script {
-                // Variabel seperti env.APK_HASH masih bisa diakses di sini
                 try {
                     emailext(
                         subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
@@ -267,18 +266,16 @@ pipeline {
 
     Dikirim otomatis dari Jenkins.
     """,
-                        mimeType: 'text/plain',  // atau 'text/html' kalau mau format lebih bagus
-                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',  // ← Attach PDF di sini!
-                        attachLog: true,  // Optional: attach console log kalau perlu
+                        mimeType: 'text/plain',
+                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',  // attach PDF kalau sudah generate
+                        attachLog: true,
                         compressLog: true,
-                        recipientProviders: []  // Matikan provider dinamis biar gak error
-                        // Hapus 'to:' kalau sudah pakai Default Recipients global
-                        // to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com'  // Uncomment kalau mau force, tapi coba tanpa dulu
+                        recipientProviders: []  // tetap kosong
+                        // JANGAN pakai 'to:' di sini kalau sudah isi Default Recipients global
                     )
-                    echo "Email dengan attachment PDF berhasil dicoba kirim dari post block."
+                    echo "Email dengan attachment PDF dicoba kirim dari post block."
                 } catch (Exception e) {
                     echo "Gagal kirim email: ${e.getMessage()}"
-                    // Build tetap lanjut meski email gagal
                 }
             }
         }
