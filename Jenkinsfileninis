@@ -263,7 +263,7 @@ pipeline {
         Semangat auditnya! 🚀""",
                             to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
                             mimeType: 'text/plain',
-                            recipientProviders: [[$class: 'hudson.plugins.emailext.plugins.recipients.ListRecipientProvider']]
+                            recipientProviders: []
                             // ^ Ini yang penting: force pakai hanya daftar di 'to:'
                         )
                         echo "Email berhasil dikirim (atau setidaknya dicoba)."
