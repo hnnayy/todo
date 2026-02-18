@@ -290,12 +290,14 @@ pipeline {
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
             emailext(
-                subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
-                body: "Build Status: ${currentBuild.currentResult}\n\nLaporan SAST & DAST terlampir.\n\nProject: ${env.JOB_NAME}\nBuild Number: ${env.BUILD_NUMBER}",
-                to: "mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com",
-                attachmentsPattern: "*.pdf",
+                to: 'mutiahanin2017@gmail.com',
+                cc: 'sutrawberry12@gmail.com',
+                bcc: 'syifaamaraqueen@gmail.com',
+                subject: 'Test Email',
+                body: 'Test',
                 mimeType: 'text/plain'
             )
+
 
 
         }
