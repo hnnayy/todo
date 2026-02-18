@@ -247,28 +247,51 @@ pipeline {
     post {
         always {
 
-            archiveArtifacts artifacts: 'apk-outputs/*.apk, **/*.json', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-            // ZIP semua file JSON pakai PowerShell
-            bat """
-            powershell -Command "Compress-Archive -Path *.json -DestinationPath security_reports.zip -Force"
-            """
+            script {
+                if (env.APK_HASH) {
 
-            archiveArtifacts artifacts: 'security_reports.zip', allowEmptyArchive: true
+                    bat """
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/download_pdf ^
+                    -o sast_report.pdf
+                    """
+
+                    bat """
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
+                    -o dast_report.pdf
+                    """
+
+                } else {
+                    echo "APK_HASH not found. Skipping PDF download."
+                }
+            }
+
+
+            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
             mail(
-                to: 'mutiahanin2017@gmail.com,gghurl111@gmail.com,sutrawberry12@gmail.com',
-                subject: "Security Scan - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
+                subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                 body: """
     Build Status: ${currentBuild.currentResult}
 
-    Report bisa di-download di Jenkins Artifact:
+    Laporan PDF terlampir sebagai artifact Jenkins.
 
-    ${env.BUILD_URL}artifact/security_reports.zip
+    Download di:
+    ${env.BUILD_URL}artifact/sast_report.pdf
+    ${env.BUILD_URL}artifact/dast_report.pdf
     """
             )
         }
     }
+
 
 
 
