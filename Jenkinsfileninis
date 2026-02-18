@@ -267,11 +267,11 @@ pipeline {
     Dikirim otomatis dari Jenkins.
     """,
                         mimeType: 'text/plain',
-                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',  // attach PDF kalau sudah generate
+                        to: '$DEFAULT_RECIPIENTS',  // ← Ini penting! Tarik list dari global Default Recipients
+                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',  // Attach PDF kalau sudah generate
                         attachLog: true,
                         compressLog: true,
-                        recipientProviders: []  // tetap kosong
-                        // JANGAN pakai 'to:' di sini kalau sudah isi Default Recipients global
+                        recipientProviders: []  // Tetap kosong biar gak konflik
                     )
                     echo "Email dengan attachment PDF dicoba kirim dari post block."
                 } catch (Exception e) {
