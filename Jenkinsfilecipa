@@ -204,19 +204,20 @@ post {
                 echo "Uploading reports to Google Drive..."
 
                 // Upload PDF ke folder JenkinsReports
-                bat 'rclone copy sast_report.pdf gdrive:JenkinsReports'
-                bat 'rclone copy dast_report.pdf gdrive:JenkinsReports'
+bat 'C:\\rclone\\rclone.exe copy sast_report.pdf gdrive:JenkinsReports'
+bat 'C:\\rclone\\rclone.exe copy dast_report.pdf gdrive:JenkinsReports'
 
                 // Ambil public link
-                def sastLink = bat(
-                    script: 'rclone link gdrive:JenkinsReports/sast_report.pdf',
-                    returnStdout: true
-                ).trim()
+def sastLink = bat(
+    script: 'C:\\rclone\\rclone.exe link gdrive:JenkinsReports/sast_report.pdf',
+    returnStdout: true
+).trim()
 
-                def dastLink = bat(
-                    script: 'rclone link gdrive:JenkinsReports/dast_report.pdf',
-                    returnStdout: true
-                ).trim()
+def dastLink = bat(
+    script: 'C:\\rclone\\rclone.exe link gdrive:JenkinsReports/dast_report.pdf',
+    returnStdout: true
+).trim()
+
 
                 echo "SAST Link: ${sastLink}"
                 echo "DAST Link: ${dastLink}"
