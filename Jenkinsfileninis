@@ -291,17 +291,12 @@ pipeline {
 
             emailext(
                 subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
-                body: """
-                Build Status: ${currentBuild.currentResult}
-
-                Laporan SAST & DAST terlampir dalam email ini.
-
-                Project: ${env.JOB_NAME}
-                Build Number: ${env.BUILD_NUMBER}
-                """,
+                body: "Build Status: ${currentBuild.currentResult}\n\nLaporan SAST & DAST terlampir.\n\nProject: ${env.JOB_NAME}\nBuild Number: ${env.BUILD_NUMBER}",
                 to: "mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com",
-                attachmentsPattern: "*.pdf"
+                attachmentsPattern: "*.pdf",
+                mimeType: 'text/plain'
             )
+
 
         }
     }
