@@ -299,7 +299,7 @@ pipeline {
                 Project: ${env.JOB_NAME}
                 Build Number: ${env.BUILD_NUMBER}
                 """,
-                to: "mutiahanin2017@gmail.com, syifaamaraqueen@gmail.com",
+                to: "mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com",
                 attachmentsPattern: "*.pdf"
             )
 
