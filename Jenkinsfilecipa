@@ -238,24 +238,26 @@ post {
 
         echo "Sending email with attachments..."
 
-        emailext(
-            subject: "Mobile Security Scan Result - Build #${env.BUILD_NUMBER}",
-            body: """
-<h3>Mobile Security Scan Completed</h3>
+emailext(
+    subject: "Mobile Security Scan Result - Build #${env.BUILD_NUMBER}",
+    body: """
+Mobile Security Scan Completed
 
-<p><b>Job:</b> ${env.JOB_NAME}</p>
-<p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
-<p><b>Status:</b> ${currentBuild.currentResult}</p>
+Job: ${env.JOB_NAME}
+Build: #${env.BUILD_NUMBER}
+Status: ${currentBuild.currentResult}
 
-<p>SAST and DAST reports are attached in this email.</p>
-
-<p>Regards,<br/>Jenkins CI</p>
+SAST and DAST reports attached.
 """,
-            mimeType: 'text/html',
-            to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-            attachmentsPattern: '*.pdf',
-            attachLog: false
-        )
+    mimeType: 'text/plain',
+    to: '',
+    recipientProviders: [
+        [$class: 'DevelopersRecipientProvider'],
+        [$class: 'RequesterRecipientProvider']
+    ],
+    attachmentsPattern: '*.pdf',
+    attachLog: false
+)
 
         echo "Email step executed."
     }
