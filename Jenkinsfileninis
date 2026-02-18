@@ -242,21 +242,25 @@ pipeline {
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
             }
         }
-    }
-
-    post {
-        always {
-            script {
+        stage('Send Email') {
+            steps {
                 emailext(
                     to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
-                    subject: 'FINAL TEST',
-                    body: 'Test',
-                    mimeType: 'text/plain',
-                    recipientProviders: []
+                    subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
+                    body: """Build selesai.
+
+        Download laporan:
+        ${env.BUILD_URL}artifact/sast_report.pdf
+        ${env.BUILD_URL}artifact/dast_report.pdf
+        """,
+                    mimeType: 'text/plain'
                 )
             }
         }
+
     }
+
+    
 
 
 
