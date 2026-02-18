@@ -207,22 +207,26 @@ post {
                 echo "Waiting before downloading PDF..."
                 sleep 15
 
-                echo "Downloading SAST PDF..."
-                bat """
-                @curl -L --fail -o sast_report.pdf ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                "${env.MOBSF_URL}/api/v1/download_pdf?hash=${env.APK_HASH}"
-                """
+echo "Downloading SAST PDF..."
+bat """
+@curl -s -X POST ^
+-H "Authorization: ${env.MOBSF_TOKEN}" ^
+--data "hash=${env.APK_HASH}" ^
+-o sast_report.pdf ^
+${env.MOBSF_URL}/api/v1/download_pdf
+"""
 
-                echo "Downloading DAST PDF..."
-                bat """
-                @curl -L --fail -o dast_report.pdf ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                "${env.MOBSF_URL}/api/v1/download_dynamic_pdf?hash=${env.APK_HASH}"
-                """
+echo "Downloading DAST PDF..."
+bat """
+@curl -s -X POST ^
+-H "Authorization: ${env.MOBSF_TOKEN}" ^
+--data "hash=${env.APK_HASH}" ^
+-o dast_report.pdf ^
+${env.MOBSF_URL}/api/v1/download_dynamic_pdf
+"""
+                bat "dir sast_report.pdf"
+                bat "dir dast_report.pdf"
 
-                echo "Checking downloaded files..."
-                bat "dir *.pdf"
 
             } else {
                 echo "APK_HASH not found. Skipping PDF download."
