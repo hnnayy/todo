@@ -226,19 +226,19 @@ script {
 }
 
 
-            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
+archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-            mail(
-                to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-                subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
+emailext(
+    subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+    body: """
 Build Status: ${currentBuild.currentResult}
 
-Download:
-${env.BUILD_URL}artifact/sast_report.pdf
-${env.BUILD_URL}artifact/dast_report.pdf
-"""
-            )
+Laporan SAST dan DAST terlampir dalam email ini.
+""",
+    to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
+    attachmentsPattern: '*.pdf'
+)
+
         }
     }
 }
