@@ -248,60 +248,17 @@ pipeline {
         always {
 
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-
-            script {
-                if (env.APK_HASH) {
-
-                    sleep 20
-
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}" ^
-                    ${env.MOBSF_URL}/api/v1/download_pdf ^
-                    -o sast_report.pdf
-                    """
-
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}" ^
-                    ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
-                    -o dast_report.pdf
-                    """
-
-                    // Validasi ukuran file
-                    bat """
-                    for %%F in (sast_report.pdf dast_report.pdf) do (
-                        if %%~zF LSS 5000 (
-                            echo File %%F terlalu kecil, kemungkinan error.
-                            del %%F
-                        )
-                    )
-                    """
-
-
-                } else {
-                    echo "APK_HASH not found. Skipping PDF download."
-                }
-            }
-
-
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
             emailext(
-                to: 'mutiahanin2017@gmail.com',
-                cc: 'sutrawberry12@gmail.com',
-                bcc: 'syifaamaraqueen@gmail.com',
-                subject: 'Test Email',
+                to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
+                subject: 'FINAL TEST',
                 body: 'Test',
                 mimeType: 'text/plain'
             )
-
-
-
         }
     }
+
 
 
 
