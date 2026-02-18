@@ -247,17 +247,31 @@ pipeline {
 
         stage('Send Email') {
             steps {
-                emailext(
-                    subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
-                    body: """Build selesai.
-        Download laporan:
-        ${env.BUILD_URL}artifact/sast_report.json    // ubah ke .json dulu karena kamu archive .json bukan .pdf
-        ${env.BUILD_URL}artifact/dast_report.json
-        """,
-                    to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
-                    mimeType: 'text/plain',
-                    recipientProviders: [[$class: 'RequesterRecipientProvider']]   // atau kosongkan saja []
-                )
+                script {
+                    try {
+                        emailext(
+                            subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
+                            body: """Build selesai ya!
+        Download laporan (format JSON):
+        - SAST: ${env.BUILD_URL}artifact/sast_report.json
+        - DAST: ${env.BUILD_URL}artifact/dast_report.json
+
+        Link MobSF langsung:
+        - SAST: ${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/
+        - DAST: ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/
+
+        Semangat auditnya! 🚀""",
+                            to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
+                            mimeType: 'text/plain',
+                            recipientProviders: [[$class: 'hudson.plugins.emailext.plugins.recipients.ListRecipientProvider']]
+                            // ^ Ini yang penting: force pakai hanya daftar di 'to:'
+                        )
+                        echo "Email berhasil dikirim (atau setidaknya dicoba)."
+                    } catch (Exception e) {
+                        echo "Gagal kirim email: ${e.getMessage()}"
+                        // Biar build tetep sukses meski email gagal
+                    }
+                }
             }
         }
 
