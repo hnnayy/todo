@@ -196,49 +196,53 @@ pipeline {
         }
     }
 
-    post {
-        always {
+post {
+    always {
 
-            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+        archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-script {
-    if (env.APK_HASH) {
+        script {
+            if (env.APK_HASH) {
 
-        echo "Downloading SAST PDF..."
+                echo "Waiting before downloading PDF..."
+                sleep 15
 
-        bat """
-        @curl -L -o sast_report.pdf ^
-        -H "Authorization: ${env.MOBSF_TOKEN}" ^
-        "${env.MOBSF_URL}/api/v1/download_pdf?hash=${env.APK_HASH}"
-        """
+                echo "Downloading SAST PDF..."
+                bat """
+                @curl -L --fail -o sast_report.pdf ^
+                -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                "${env.MOBSF_URL}/api/v1/download_pdf?hash=${env.APK_HASH}"
+                """
 
-        echo "Downloading DAST PDF..."
+                echo "Downloading DAST PDF..."
+                bat """
+                @curl -L --fail -o dast_report.pdf ^
+                -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                "${env.MOBSF_URL}/api/v1/download_dynamic_pdf?hash=${env.APK_HASH}"
+                """
 
-        bat """
-        @curl -L -o dast_report.pdf ^
-        -H "Authorization: ${env.MOBSF_TOKEN}" ^
-        "${env.MOBSF_URL}/api/v1/download_dynamic_pdf?hash=${env.APK_HASH}"
-        """
+                echo "Checking downloaded files..."
+                bat "dir *.pdf"
 
-    } else {
-        echo "APK_HASH not found. Skipping PDF download."
-    }
-}
+            } else {
+                echo "APK_HASH not found. Skipping PDF download."
+            }
+        }
 
+        archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-
-emailext(
-    subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-    body: """
+        emailext(
+            subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            body: """
 Build Status: ${currentBuild.currentResult}
 
 Laporan SAST dan DAST terlampir dalam email ini.
 """,
-    to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-    attachmentsPattern: '*.pdf'
-)
-
-        }
+            to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
+            attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
+            attachLog: false
+        )
     }
+}
+
 }
