@@ -243,44 +243,46 @@ pipeline {
             }
         }
 
-         // ================= send email =================
-
-        stage('Send Email') {
-            steps {
-                script {
-                    try {
-                        emailext(
-                            subject: "Mobile SAST & DAST Report - Build ${env.BUILD_NUMBER}",
-                            body: """Build selesai ya!
-        Download laporan (format JSON):
-        - SAST: ${env.BUILD_URL}artifact/sast_report.json
-        - DAST: ${env.BUILD_URL}artifact/dast_report.json
-
-        Link MobSF langsung:
-        - SAST: ${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/
-        - DAST: ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/
-
-        Semangat auditnya! 🚀""",
-                            to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com',
-                            mimeType: 'text/plain',
-                            attachLog: true,
-                            compressLog: true,
-                            recipientProviders: []
-                            // ^ Ini yang penting: force pakai hanya daftar di 'to:'
-                        )
-                        echo "Email berhasil dikirim (atau setidaknya dicoba)."
-                    } catch (Exception e) {
-                        echo "Gagal kirim email: ${e.getMessage()}"
-                        // Biar build tetep sukses meski email gagal
-                    }
-                }
-            }
-        }
+        
 
     }
 
     
+    post {
+        always {
+            script {
+                // Variabel seperti env.APK_HASH masih bisa diakses di sini
+                try {
+                    emailext(
+                        subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
+                        body: """Halo tim!
 
+    Build pipeline selesai dengan status: ${currentBuild.currentResult}.
+
+    Laporan lengkap SAST dan DAST terlampir dalam format PDF.
+    - SAST: Static Analysis dari MobSF
+    - DAST: Dynamic Analysis dari MobSF
+
+    Terima kasih atas perhatiannya. Semangat audit APK-nya! 💪📱
+
+    Dikirim otomatis dari Jenkins.
+    """,
+                        mimeType: 'text/plain',  // atau 'text/html' kalau mau format lebih bagus
+                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',  // ← Attach PDF di sini!
+                        attachLog: true,  // Optional: attach console log kalau perlu
+                        compressLog: true,
+                        recipientProviders: []  // Matikan provider dinamis biar gak error
+                        // Hapus 'to:' kalau sudah pakai Default Recipients global
+                        // to: 'mutiahanin2017@gmail.com,sutrawberry12@gmail.com,syifaamaraqueen@gmail.com'  // Uncomment kalau mau force, tapi coba tanpa dulu
+                    )
+                    echo "Email dengan attachment PDF berhasil dicoba kirim dari post block."
+                } catch (Exception e) {
+                    echo "Gagal kirim email: ${e.getMessage()}"
+                    // Build tetap lanjut meski email gagal
+                }
+            }
+        }
+    }
 
 
 
