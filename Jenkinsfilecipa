@@ -249,30 +249,25 @@ post {
                 echo "DAST URL: ${dastURL}"
 
                 emailext(
-                    subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
-                    body: """Halo tim!
+    subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER}",
+    body: """Halo tim,
 
-Build pipeline selesai dengan status: ${currentBuild.currentResult}.
+Build Status: ${currentBuild.currentResult}
 
-Laporan tersedia melalui MobSF Web Interface:
-
-🔹 SAST Report:
+SAST:
 ${sastURL}
 
-🔹 DAST Report:
+DAST:
 ${dastURL}
 
-Silakan akses melalui browser untuk melihat hasil lengkap analisis.
-
-Terima kasih.
-Dikirim otomatis dari Jenkins.
+Regards,
+Jenkins
 """,
-                    mimeType: 'text/plain',
-                    to: '$DEFAULT_RECIPIENTS',
-                    attachLog: true,
-                    compressLog: true,
-                    recipientProviders: []
-                )
+    mimeType: 'text/plain',
+    to: 'syifaamaraqueen@gmail.com',
+    attachLog: true,
+    compressLog: true
+)
 
                 echo "Email dengan link MobSF berhasil dikirim."
 
