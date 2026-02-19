@@ -301,23 +301,20 @@ post {
 
         archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-        script {
-                emailext(
+script {
+    emailext(
         mimeType: 'text/html',
         subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
         body: """
 <h2>Security Scan Completed</h2>
 <p>Build Status: ${currentBuild.currentResult}</p>
-<p>Reports attached.</p>
+<p>SAST & DAST reports attached.</p>
 """,
-        to: '',
-        recipientProviders: [
-            [$class: 'RequesterRecipientProvider'],
-            [$class: 'DevelopersRecipientProvider']
-        ],
+        to: 'syifaamdh@gmail.com',
         attachmentsPattern: 'sast_report.pdf,dast_report.pdf'
     )
-        }
+}
+
     }
 }
 
