@@ -44,18 +44,21 @@ pipeline {
 
     stages {
 
+        // ================= CHECKOUT =================
         stage('Checkout') {
             steps {
                 git branch: 'main', url: 'https://github.com/hnnayy/todo.git'
             }
         }
 
+        // ================= PREPARE =================
         stage('Prepare Workspace') {
             steps {
                 bat 'if not exist apk-outputs mkdir apk-outputs'
             }
         }
 
+        // ================= FLUTTER ENV =================
         stage('Flutter Environment Check') {
             steps {
                 bat """
@@ -66,6 +69,7 @@ pipeline {
             }
         }
 
+        // ================= BUILD APK =================
         stage('Build APK') {
             steps {
                 bat """
@@ -130,6 +134,7 @@ pipeline {
             }
         }
 
+        // ================= EMULATOR =================
         stage('Start Emulator') {
             steps {
                 bat """
@@ -144,6 +149,7 @@ pipeline {
             }
         }
 
+        // ================= INSTALL APK =================
         stage('Install APK') {
             steps {
                 script {
@@ -152,6 +158,7 @@ pipeline {
                     def destPath   = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
 
                     bat "copy \"${sourcePath}\" \"${destPath}\""
+
                     bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
                     bat "adb install -r \"${destPath}\""
                 }
@@ -162,7 +169,6 @@ pipeline {
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
-
                     bat "adb shell input keyevent 82"
                     sleep 2
 
@@ -230,6 +236,7 @@ pipeline {
             }
         }
 
+        // ================= CLEANUP =================
         stage('Cleanup') {
             steps {
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
@@ -237,45 +244,50 @@ pipeline {
         }
     }
 
-post {
-    always {
-        script {
-            try {
+    post {
+        always {
 
-                def sastURL = "${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/"
-                def dastURL = "${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
+            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-                echo "SAST URL: ${sastURL}"
-                echo "DAST URL: ${dastURL}"
+            script {
+                if (env.APK_HASH) {
 
-                emailext(
-    subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER}",
-    body: """Halo tim,
+                    bat """
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/download_pdf ^
+                    -o sast_report.pdf
+                    """
 
+                    bat """
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
+                    -o dast_report.pdf
+                    """
+
+                } else {
+                    echo "APK_HASH not found. Skipping PDF download."
+                }
+            }
+
+            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
+
+            mail(
+                to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
+                subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
 Build Status: ${currentBuild.currentResult}
 
-SAST:
-${sastURL}
+Laporan PDF terlampir sebagai artifact Jenkins.
 
-DAST:
-${dastURL}
-
-Regards,
-Jenkins
-""",
-    mimeType: 'text/plain',
-    to: 'syifaamaraqueen@gmail.com',
-    attachLog: true,
-    compressLog: true
-)
-
-                echo "Email dengan link MobSF berhasil dikirim."
-
-            } catch (Exception e) {
-                echo "Gagal kirim email: ${e.getMessage()}"
-            }
+Download di:
+${env.BUILD_URL}artifact/sast_report.pdf
+${env.BUILD_URL}artifact/dast_report.pdf
+"""
+            )
         }
     }
-}
-
 }
