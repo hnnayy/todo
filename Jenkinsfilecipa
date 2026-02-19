@@ -237,36 +237,50 @@ pipeline {
         }
     }
 
-    post {
-        always {
-            script {
-                try {
-                    emailext(
-                        subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
-                        body: """Halo tim!
+post {
+    always {
+        script {
+            try {
+
+                def sastURL = "${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/"
+                def dastURL = "${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
+
+                echo "SAST URL: ${sastURL}"
+                echo "DAST URL: ${dastURL}"
+
+                emailext(
+                    subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
+                    body: """Halo tim!
 
 Build pipeline selesai dengan status: ${currentBuild.currentResult}.
 
-Laporan lengkap SAST dan DAST terlampir dalam format PDF.
-- SAST: Static Analysis dari MobSF
-- DAST: Dynamic Analysis dari MobSF
+Laporan tersedia melalui MobSF Web Interface:
 
-Terima kasih atas perhatiannya. Semangat audit APK-nya! 💪📱
+🔹 SAST Report:
+${sastURL}
 
+🔹 DAST Report:
+${dastURL}
+
+Silakan akses melalui browser untuk melihat hasil lengkap analisis.
+
+Terima kasih.
 Dikirim otomatis dari Jenkins.
 """,
-                        mimeType: 'text/plain',
-                        to: '$DEFAULT_RECIPIENTS',
-                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
-                        attachLog: true,
-                        compressLog: true,
-                        recipientProviders: []
-                    )
-                    echo "Email dengan attachment PDF dicoba kirim."
-                } catch (Exception e) {
-                    echo "Gagal kirim email: ${e.getMessage()}"
-                }
+                    mimeType: 'text/plain',
+                    to: '$DEFAULT_RECIPIENTS',
+                    attachLog: true,
+                    compressLog: true,
+                    recipientProviders: []
+                )
+
+                echo "Email dengan link MobSF berhasil dikirim."
+
+            } catch (Exception e) {
+                echo "Gagal kirim email: ${e.getMessage()}"
             }
         }
     }
+}
+
 }
