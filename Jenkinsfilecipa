@@ -254,23 +254,36 @@ script {
 
         sleep 10
 
-        bat """
-        @curl -f -s -X POST ^
-        -H "Authorization: ${env.MOBSF_TOKEN}" ^
-        --data "hash=${env.APK_HASH}" ^
-        ${env.MOBSF_URL}/api/v1/download_pdf ^
-        -o sast_report.pdf
-        """
+        def sastStatus = bat(
+            script: """
+            @curl -f -s -X POST ^
+            -H "Authorization: ${env.MOBSF_TOKEN}" ^
+            --data "hash=${env.APK_HASH}" ^
+            ${env.MOBSF_URL}/api/v1/download_pdf ^
+            -o sast_report.pdf
+            """,
+            returnStatus: true
+        )
 
-        bat """
-        @curl -f -s -X POST ^
-        -H "Authorization: ${env.MOBSF_TOKEN}" ^
-        --data "hash=${env.APK_HASH}" ^
-        ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
-        -o dast_report.pdf
-        """
+        def dastStatus = bat(
+            script: """
+            @curl -f -s -X POST ^
+            -H "Authorization: ${env.MOBSF_TOKEN}" ^
+            --data "hash=${env.APK_HASH}" ^
+            ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
+            -o dast_report.pdf
+            """,
+            returnStatus: true
+        )
 
-        // Validasi ukuran file
+        if (sastStatus != 0) {
+            echo "Gagal download SAST PDF"
+        }
+
+        if (dastStatus != 0) {
+            echo "Gagal download DAST PDF"
+        }
+
         bat """
         for %%A in (sast_report.pdf) do (
             if %%~zA==0 echo SAST PDF kosong!
