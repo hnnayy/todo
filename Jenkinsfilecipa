@@ -244,78 +244,77 @@ pipeline {
         }
     }
 
-    post {
-        always {
+post {
+    always {
 
-            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+        archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-script {
-    if (env.APK_HASH) {
+        script {
+            if (env.APK_HASH) {
 
-        sleep 10
+                sleep 10
+                echo "Downloading UI-based PDF report for hash: ${env.APK_HASH}"
 
-        def sastStatus = bat(
-            script: """
-            @curl -f -s -X POST ^
-            -H "Authorization: ${env.MOBSF_TOKEN}" ^
-            --data "hash=${env.APK_HASH}" ^
-            ${env.MOBSF_URL}/api/v1/download_pdf ^
-            -o sast_report.pdf
-            """,
-            returnStatus: true
-        )
+                // ================= SAST PDF (UI Version) =================
+                def sastStatus = bat(
+                    script: """
+                    curl -L ^
+                    "${env.MOBSF_URL}/pdf/${env.APK_HASH}/" ^
+                    --output sast_report.pdf
+                    """,
+                    returnStatus: true
+                )
 
-        def dastStatus = bat(
-            script: """
-            @curl -f -s -X POST ^
-            -H "Authorization: ${env.MOBSF_TOKEN}" ^
-            --data "hash=${env.APK_HASH}" ^
-            ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
-            -o dast_report.pdf
-            """,
-            returnStatus: true
-        )
+                // ================= DAST PDF (UI Version) =================
+                def dastStatus = bat(
+                    script: """
+                    curl -L ^
+                    "${env.MOBSF_URL}/dynamic_report/${env.APK_HASH}" ^
+                    --output dast_report.pdf
+                    """,
+                    returnStatus: true
+                )
 
-        if (sastStatus != 0) {
-            echo "Gagal download SAST PDF"
+                if (sastStatus != 0) {
+                    echo "❌ Gagal download SAST PDF"
+                }
+
+                if (dastStatus != 0) {
+                    echo "❌ Gagal download DAST PDF"
+                }
+
+                // Cek apakah file kosong
+                bat """
+                for %%A in (sast_report.pdf) do (
+                    if %%~zA==0 echo SAST PDF kosong!
+                )
+
+                for %%A in (dast_report.pdf) do (
+                    if %%~zA==0 echo DAST PDF kosong!
+                )
+                """
+
+            } else {
+                echo "APK_HASH not found. Skipping PDF download."
+            }
         }
 
-        if (dastStatus != 0) {
-            echo "Gagal download DAST PDF"
-        }
+        archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-        bat """
-        for %%A in (sast_report.pdf) do (
-            if %%~zA==0 echo SAST PDF kosong!
+        mail(
+            to: 'syifaamaraqueen@gmail.com',
+            subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            body: """
+Build Status: ${currentBuild.currentResult}
+
+SAST UI:
+${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/
+
+DAST UI:
+${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/
+"""
         )
-
-        for %%A in (dast_report.pdf) do (
-            if %%~zA==0 echo DAST PDF kosong!
-        )
-        """
-
-    } else {
-        echo "APK_HASH not found. Skipping PDF download."
     }
 }
 
-
-            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-
-mail(
-    to: 'syifaamaraqueen@gmail.com',
-    subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-    body: """
-Build Status: ${currentBuild.currentResult}
-
-SAST:
-${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/
-
-DAST:
-${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/
-"""
-)
-
-        }
-    }
 }
