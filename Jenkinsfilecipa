@@ -302,19 +302,20 @@ script {
 
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-            mail(
-                to: 'mutiahanin2017@gmail.com,syifaamaraqueen@gmail.com,sutrawberry12@gmail.com',
-                subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
+mail(
+    to: 'syifaamaraqueen@gmail.com',
+    subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+    body: """
 Build Status: ${currentBuild.currentResult}
 
-Laporan PDF terlampir sebagai artifact Jenkins.
+SAST:
+${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/
 
-Download di:
-${env.BUILD_URL}artifact/sast_report.pdf
-${env.BUILD_URL}artifact/dast_report.pdf
+DAST:
+${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/
 """
-            )
+)
+
         }
     }
 }
