@@ -76,6 +76,7 @@ pipeline {
             }
         }
 
+        // ================= SAST =================
         stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
@@ -83,6 +84,8 @@ pipeline {
                     if (!fileExists(apkPath)) {
                         error "APK not found: ${apkPath}"
                     }
+
+                    echo "Uploading APK to MobSF (SAST)..."
 
                     def uploadResponse = bat(
                         script: """
@@ -98,6 +101,7 @@ pipeline {
                     if (!apkHash) error "MobSF upload failed"
 
                     env.APK_HASH = apkHash
+                    echo "SAST Hash: ${apkHash}"
 
                     bat """
                     @curl -s -X POST ^
@@ -120,6 +124,7 @@ pipeline {
                     if (json) {
                         writeFile file: 'sast_report.json', text: json
                         archiveArtifacts artifacts: 'sast_report.json'
+                        echo "✅ SAST Report URL: ${env.MOBSF_URL}/static_analyzer/${apkHash}/"
                     }
                 }
             }
@@ -153,9 +158,11 @@ pipeline {
             }
         }
 
+        // ================= DAST =================
         stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
+
                     bat "adb shell input keyevent 82"
                     sleep 2
 
@@ -177,7 +184,24 @@ pipeline {
 
                     try {
                         bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --throttle 1500 -v 200"
-                    } catch (Exception e) {}
+                    } catch (Exception e) {
+                        echo "Monkey finished."
+                    }
+
+                    def tlsRaw = bat(
+                        script: """
+                        @curl -s -X POST ^
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        --data "hash=${env.APK_HASH}" ^
+                        ${env.MOBSF_URL}/api/v1/android/tls_tests
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    def tlsJson = cleanJsonString(tlsRaw)
+                    if (tlsJson) {
+                        writeFile file: 'tls_report.json', text: tlsJson
+                    }
 
                     bat """
                     @curl -s -X POST ^
@@ -185,6 +209,23 @@ pipeline {
                     --data "hash=${env.APK_HASH}" ^
                     ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
+
+                    def raw = bat(
+                        script: """
+                        @curl -s -X POST ^
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        --data "hash=${env.APK_HASH}" ^
+                        ${env.MOBSF_URL}/api/v1/dynamic/report_json
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    def json = cleanJsonString(raw)
+                    if (json) {
+                        writeFile file: 'dast_report.json', text: json
+                        archiveArtifacts artifacts: 'dast_report.json, tls_report.json', allowEmptyArchive: true
+                        echo "✅ DAST Report URL: ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
+                    }
                 }
             }
         }
@@ -196,68 +237,36 @@ pipeline {
         }
     }
 
-post {
-    always {
-        script {
-            try {
-
-                echo "Uploading reports to Google Drive..."
-
-                // Upload PDF ke folder JenkinsReports
-bat 'C:\\rclone\\rclone.exe copy sast_report.pdf gdrive:JenkinsReports'
-bat 'C:\\rclone\\rclone.exe copy dast_report.pdf gdrive:JenkinsReports'
-
-                // Ambil public link
-def sastLink = bat(
-    script: 'C:\\rclone\\rclone.exe link gdrive:JenkinsReports/sast_report.pdf',
-    returnStdout: true
-).trim()
-
-def dastLink = bat(
-    script: 'C:\\rclone\\rclone.exe link gdrive:JenkinsReports/dast_report.pdf',
-    returnStdout: true
-).trim()
-
-
-                echo "SAST Link: ${sastLink}"
-                echo "DAST Link: ${dastLink}"
-
-                // Kirim email pakai link
-                emailext(
-                    subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
-                    body: """Halo tim!
+    post {
+        always {
+            script {
+                try {
+                    emailext(
+                        subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
+                        body: """Halo tim!
 
 Build pipeline selesai dengan status: ${currentBuild.currentResult}.
 
-Laporan tersedia melalui Google Drive:
+Laporan lengkap SAST dan DAST terlampir dalam format PDF.
+- SAST: Static Analysis dari MobSF
+- DAST: Dynamic Analysis dari MobSF
 
-🔹 SAST Report:
-${sastLink}
+Terima kasih atas perhatiannya. Semangat audit APK-nya! 💪📱
 
-🔹 DAST Report:
-${dastLink}
-
-Silakan klik link di atas untuk mengunduh report.
-
-Terima kasih.
 Dikirim otomatis dari Jenkins.
 """,
-                    mimeType: 'text/plain',
-                    to: '$DEFAULT_RECIPIENTS',
-                    attachLog: true,
-                    compressLog: true,
-                    recipientProviders: []
-                )
-
-                echo "Email dengan link Google Drive berhasil dicoba kirim."
-
-            } catch (Exception e) {
-                echo "Gagal upload atau kirim email: ${e.getMessage()}"
+                        mimeType: 'text/plain',
+                        to: '$DEFAULT_RECIPIENTS',
+                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
+                        attachLog: true,
+                        compressLog: true,
+                        recipientProviders: []
+                    )
+                    echo "Email dengan attachment PDF dicoba kirim."
+                } catch (Exception e) {
+                    echo "Gagal kirim email: ${e.getMessage()}"
+                }
             }
         }
     }
-}
-
-
-
 }
