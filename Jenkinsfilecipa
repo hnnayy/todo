@@ -249,29 +249,43 @@ pipeline {
 
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
 
-            script {
-                if (env.APK_HASH) {
+script {
+    if (env.APK_HASH) {
 
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}" ^
-                    ${env.MOBSF_URL}/api/v1/download_pdf ^
-                    -o sast_report.pdf
-                    """
+        sleep 10
 
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}" ^
-                    ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
-                    -o dast_report.pdf
-                    """
+        bat """
+        @curl -f -s -X POST ^
+        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+        --data "hash=${env.APK_HASH}" ^
+        ${env.MOBSF_URL}/api/v1/download_pdf ^
+        -o sast_report.pdf
+        """
 
-                } else {
-                    echo "APK_HASH not found. Skipping PDF download."
-                }
-            }
+        bat """
+        @curl -f -s -X POST ^
+        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+        --data "hash=${env.APK_HASH}" ^
+        ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
+        -o dast_report.pdf
+        """
+
+        // Validasi ukuran file
+        bat """
+        for %%A in (sast_report.pdf) do (
+            if %%~zA==0 echo SAST PDF kosong!
+        )
+
+        for %%A in (dast_report.pdf) do (
+            if %%~zA==0 echo DAST PDF kosong!
+        )
+        """
+
+    } else {
+        echo "APK_HASH not found. Skipping PDF download."
+    }
+}
+
 
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
