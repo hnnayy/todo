@@ -302,7 +302,7 @@ post {
         archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
 emailext(
-    to: 'syifaamaraqueen@gmail.com',
+    to: 'syifaamdh@gmail.com',
     subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
     body: """
 Build Status: ${currentBuild.currentResult}
