@@ -41,7 +41,9 @@ pipeline {
         APP_PACKAGE = "com.example.mobileapp"
 
         MOBSF_URL   = "http://localhost:8000"
-        MOBSF_TOKEN = "67f8dcdbaf63751750653685407053c3e1762a3394c5833de1d00379ca06c0fe"
+
+        // TOKEN SUDAH DIGANTI
+        MOBSF_TOKEN = "8e2a73a972044f782981594b2eefdf86e13e08745853097432943c9bcccd2a52"
     }
 
     stages {
@@ -99,8 +101,6 @@ pipeline {
 
                     if (!fileExists(apkPath)) {
 
-                        echo "DEBUG: Folder structure"
-
                         bat 'dir build'
                         bat 'dir build\\app'
                         bat 'dir build\\app\\outputs'
@@ -110,7 +110,6 @@ pipeline {
                     }
 
                     echo "APK ditemukan ✔"
-
                 }
             }
         }
@@ -174,9 +173,7 @@ pipeline {
                         archiveArtifacts artifacts: 'sast_report.json'
 
                         echo "SAST selesai"
-
                     }
-
                 }
             }
         }
@@ -209,7 +206,6 @@ pipeline {
                     bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
 
                     bat "adb install -r \"${apkPath}\""
-
                 }
             }
         }
@@ -259,9 +255,7 @@ pipeline {
                         archiveArtifacts artifacts: 'dast_report.json'
 
                         echo "DAST selesai"
-
                     }
-
                 }
             }
         }
