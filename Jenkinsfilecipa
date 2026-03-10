@@ -17,12 +17,13 @@ def cleanJsonString(String rawOutput) {
 
 // ================= PIPELINE =================
 pipeline {
+
     agent any
 
     parameters {
         choice(
             name: 'BUILD_TYPE',
-            choices: ['debug', 'release'],
+            choices: ['debug','release'],
             description: 'Pilih tipe build APK'
         )
     }
@@ -62,25 +63,28 @@ pipeline {
         // ================= FLUTTER CHECK =================
         stage('Flutter Environment Check') {
             steps {
-                bat """
-                git config --global --add safe.directory "%WORKSPACE%"
-                flutter config --jdk-dir "${env.JAVA_HOME}"
-                flutter doctor -v
-                """
+
+                bat 'git config --global --add safe.directory "%WORKSPACE%"'
+                bat "flutter config --jdk-dir \"${env.JAVA_HOME}\""
+                bat 'flutter doctor -v'
+
             }
         }
 
         // ================= BUILD APK =================
         stage('Build APK') {
             steps {
-                bat """
-                flutter clean
-                flutter pub get
-                flutter build apk --${params.BUILD_TYPE}
 
-                echo ===== APK OUTPUT =====
-                dir build\\app\\outputs\\flutter-apk
-                """
+                bat 'flutter clean'
+                bat 'flutter pub get'
+                bat "flutter build apk --${params.BUILD_TYPE}"
+
+                bat 'echo ===== APK OUTPUT ====='
+                bat 'dir build'
+                bat 'dir build\\app'
+                bat 'dir build\\app\\outputs'
+                bat 'dir build\\app\\outputs\\flutter-apk'
+
             }
         }
 
@@ -94,10 +98,19 @@ pipeline {
                     echo "Checking APK path: ${apkPath}"
 
                     if (!fileExists(apkPath)) {
+
+                        echo "DEBUG: Folder structure"
+
+                        bat 'dir build'
+                        bat 'dir build\\app'
+                        bat 'dir build\\app\\outputs'
+                        bat 'dir build\\app\\outputs\\flutter-apk'
+
                         error "APK tidak ditemukan: ${apkPath}"
                     }
 
                     echo "APK ditemukan ✔"
+
                 }
             }
         }
@@ -156,10 +169,14 @@ pipeline {
                     def json = cleanJsonString(rawReport)
 
                     if (json) {
+
                         writeFile file: 'sast_report.json', text: json
                         archiveArtifacts artifacts: 'sast_report.json'
+
                         echo "SAST selesai"
+
                     }
+
                 }
             }
         }
@@ -192,6 +209,7 @@ pipeline {
                     bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
 
                     bat "adb install -r \"${apkPath}\""
+
                 }
             }
         }
@@ -236,10 +254,14 @@ pipeline {
                     def json = cleanJsonString(raw)
 
                     if (json) {
+
                         writeFile file: 'dast_report.json', text: json
                         archiveArtifacts artifacts: 'dast_report.json'
+
                         echo "DAST selesai"
+
                     }
+
                 }
             }
         }
@@ -255,7 +277,9 @@ pipeline {
 
     // ================= EMAIL REPORT =================
     post {
+
         always {
+
             script {
 
                 try {
@@ -285,7 +309,11 @@ Terima kasih.
                     echo "Gagal kirim email: ${e.getMessage()}"
 
                 }
+
             }
+
         }
+
     }
+
 }
