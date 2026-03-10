@@ -303,15 +303,21 @@ post {
 
 script {
     emailext(
-        mimeType: 'text/html',
         subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
         body: """
 <h2>Security Scan Completed</h2>
-<p>Build Status: ${currentBuild.currentResult}</p>
-<p>SAST & DAST reports attached.</p>
+<p><b>Build Status:</b> ${currentBuild.currentResult}</p>
+
+<p>MobSF Reports Attached:</p>
+<ul>
+<li>SAST Report</li>
+<li>DAST Report</li>
+</ul>
 """,
-        to: 'syifaamdh@gmail.com',
-        attachmentsPattern: 'sast_report.pdf,dast_report.pdf'
+        mimeType: 'text/html',
+        to: "syifaamdh@gmail.com",
+        attachmentsPattern: "*.pdf",
+        attachLog: true
     )
 }
 
