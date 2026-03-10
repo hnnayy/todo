@@ -246,81 +246,50 @@ pipeline {
 
 post {
     always {
-
-        archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-
         script {
+
+            def sastLink = ""
+            def dastLink = ""
+
             if (env.APK_HASH) {
+                sastLink = "${env.MOBSF_URL}/static_analyzer/${env.APK_HASH}/"
+                dastLink = "${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
+            }
 
-                sleep 10
-                echo "Downloading UI-based PDF report for hash: ${env.APK_HASH}"
+            try {
 
-                // ================= SAST PDF (UI Version) =================
-                def sastStatus = bat(
-                    script: """
-                    curl -L ^
-                    "${env.MOBSF_URL}/pdf/${env.APK_HASH}/" ^
-                    --output sast_report.pdf
-                    """,
-                    returnStatus: true
+                emailext(
+                    subject: "Mobile Security Scan - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
+                    mimeType: 'text/html',
+                    to: 'syifaamdh@gmail.com',
+                    body: """
+<h2>Mobile Security Scan Completed</h2>
+
+<p><b>Build:</b> ${env.JOB_NAME} #${env.BUILD_NUMBER}</p>
+<p><b>Status:</b> ${currentBuild.currentResult}</p>
+
+<h3>MobSF Security Reports</h3>
+
+<p><b>SAST Report</b><br>
+<a href="${sastLink}">${sastLink}</a></p>
+
+<p><b>DAST Report</b><br>
+<a href="${dastLink}">${dastLink}</a></p>
+
+<hr>
+
+<p>Generated automatically by Jenkins CI/CD Pipeline.</p>
+"""
                 )
 
-                // ================= DAST PDF (UI Version) =================
-                def dastStatus = bat(
-                    script: """
-                    curl -L ^
-                    "${env.MOBSF_URL}/dynamic_report/${env.APK_HASH}" ^
-                    --output dast_report.pdf
-                    """,
-                    returnStatus: true
-                )
+                echo "Email berhasil dikirim dengan link report."
 
-                if (sastStatus != 0) {
-                    echo "❌ Gagal download SAST PDF"
-                }
+            } catch (Exception e) {
 
-                if (dastStatus != 0) {
-                    echo "❌ Gagal download DAST PDF"
-                }
+                echo "Gagal kirim email: ${e.getMessage()}"
 
-                // Cek apakah file kosong
-                bat """
-                for %%A in (sast_report.pdf) do (
-                    if %%~zA==0 echo SAST PDF kosong!
-                )
-
-                for %%A in (dast_report.pdf) do (
-                    if %%~zA==0 echo DAST PDF kosong!
-                )
-                """
-
-            } else {
-                echo "APK_HASH not found. Skipping PDF download."
             }
         }
-
-        archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-
-script {
-    emailext(
-        subject: "Security Scan Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-        body: """
-<h2>Security Scan Completed</h2>
-<p><b>Build Status:</b> ${currentBuild.currentResult}</p>
-
-<p>MobSF Reports Attached:</p>
-<ul>
-<li>SAST Report</li>
-<li>DAST Report</li>
-</ul>
-""",
-        mimeType: 'text/html',
-        to: "syifaamdh@gmail.com",
-        attachmentsPattern: "*.pdf",
-        attachLog: true
-    )
-}
-
     }
 }
 
