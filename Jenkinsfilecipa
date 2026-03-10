@@ -260,13 +260,13 @@ pipeline {
                     -o sast_report.pdf
                     """
 
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}" ^
-                    ${env.MOBSF_URL}/api/v1/download_dynamic_pdf ^
-                    -o dast_report.pdf
-                    """
+bat """
+"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
+--headless ^
+--disable-gpu ^
+--print-to-pdf=dast_report.pdf ^
+${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}
+"""
 
                 } else {
                     echo "APK_HASH not found. Skipping PDF download."
