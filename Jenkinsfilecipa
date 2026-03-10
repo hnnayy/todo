@@ -23,7 +23,7 @@ pipeline {
         choice(
             name: 'BUILD_TYPE',
             choices: ['debug', 'release'],
-            description: 'Pilih tipe build APK (Release direkomendasikan untuk audit)'
+            description: 'Pilih tipe build APK'
         )
     }
 
@@ -45,18 +45,21 @@ pipeline {
 
     stages {
 
+        // ================= CHECKOUT =================
         stage('Checkout') {
             steps {
                 git branch: 'main', url: 'https://github.com/hnnayy/todo.git'
             }
         }
 
+        // ================= PREPARE =================
         stage('Prepare Workspace') {
             steps {
                 bat 'if not exist apk-outputs mkdir apk-outputs'
             }
         }
 
+        // ================= FLUTTER CHECK =================
         stage('Flutter Environment Check') {
             steps {
                 bat """
@@ -67,31 +70,50 @@ pipeline {
             }
         }
 
+        // ================= BUILD APK =================
         stage('Build APK') {
             steps {
                 bat """
+                flutter clean
                 flutter pub get
                 flutter build apk --${params.BUILD_TYPE}
+
+                echo ===== APK OUTPUT =====
                 dir build\\app\\outputs\\flutter-apk
                 """
             }
         }
 
-        stage('SAST - Static Analysis (MobSF)') {
+        // ================= VERIFY APK =================
+        stage('Verify APK') {
             steps {
                 script {
 
                     def apkPath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
 
+                    echo "Checking APK path: ${apkPath}"
+
                     if (!fileExists(apkPath)) {
-                        error "APK not found: ${apkPath}"
+                        error "APK tidak ditemukan: ${apkPath}"
                     }
 
-                    echo "Uploading APK to MobSF..."
+                    echo "APK ditemukan ✔"
+                }
+            }
+        }
+
+        // ================= SAST =================
+        stage('SAST - MobSF Static Analysis') {
+            steps {
+                script {
+
+                    def apkPath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
+
+                    echo "Uploading APK ke MobSF..."
 
                     def uploadResponse = bat(
                         script: """
-                        @curl -s ^
+                        curl -X POST ^
                         -H "Authorization: ${env.MOBSF_TOKEN}" ^
                         -F "file=@${apkPath}" ^
                         ${env.MOBSF_URL}/api/v1/upload
@@ -99,10 +121,13 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
+                    echo "MobSF Upload Response:"
+                    echo uploadResponse
+
                     def apkHash = extractHashFromResponse(uploadResponse)
 
                     if (!apkHash) {
-                        error "MobSF upload failed"
+                        error "MobSF upload gagal - hash tidak ditemukan"
                     }
 
                     env.APK_HASH = apkHash
@@ -110,15 +135,17 @@ pipeline {
                     echo "APK Hash: ${apkHash}"
 
                     bat """
-                    @curl -s -X POST ^
+                    curl -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
                     --data "hash=${apkHash}" ^
                     ${env.MOBSF_URL}/api/v1/scan
                     """
 
+                    sleep 10
+
                     def rawReport = bat(
                         script: """
-                        @curl -s -X POST ^
+                        curl -X POST ^
                         -H "Authorization: ${env.MOBSF_TOKEN}" ^
                         --data "hash=${apkHash}" ^
                         ${env.MOBSF_URL}/api/v1/report_json
@@ -131,12 +158,13 @@ pipeline {
                     if (json) {
                         writeFile file: 'sast_report.json', text: json
                         archiveArtifacts artifacts: 'sast_report.json'
-                        echo "SAST Report: ${env.MOBSF_URL}/static_analyzer/${apkHash}/"
+                        echo "SAST selesai"
                     }
                 }
             }
         }
 
+        // ================= START EMULATOR =================
         stage('Start Emulator') {
             steps {
 
@@ -144,68 +172,52 @@ pipeline {
                 start /b "" "${env.ANDROID_HOME}\\emulator\\emulator.exe" ^
                 -avd "${env.AVD_NAME}" ^
                 -no-window -no-audio ^
-                -gpu swiftshader_indirect -wipe-data
+                -gpu swiftshader_indirect
                 """
 
                 sleep 60
 
                 bat "adb wait-for-device"
-
                 bat "adb shell getprop sys.boot_completed"
             }
         }
 
+        // ================= INSTALL APK =================
         stage('Install APK') {
             steps {
                 script {
 
-                    def timestamp = new Date().format("dd-MM-yyyy_HH-mm-ss")
-
-                    def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
-
-                    def destPath   = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
-
-                    bat "copy \"${sourcePath}\" \"${destPath}\""
+                    def apkPath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
 
                     bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
 
-                    bat "adb install -r \"${destPath}\""
+                    bat "adb install -r \"${apkPath}\""
                 }
             }
         }
 
-        stage('DAST - Dynamic Analysis (MobSF)') {
+        // ================= DAST =================
+        stage('DAST - MobSF Dynamic Analysis') {
             steps {
                 script {
 
-                    bat "adb shell input keyevent 82"
-
-                    sleep 2
-
                     bat """
-                    @curl -s -X POST ^
+                    curl -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
                     --data "hash=${env.APK_HASH}" ^
                     ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
                     """
 
-                    sleep 25
-
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass" ^
-                    ${env.MOBSF_URL}/api/v1/frida/instrument
-                    """
+                    sleep 20
 
                     try {
-                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --throttle 1500 -v 200"
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} -v 200"
                     } catch (Exception e) {
-                        echo "Monkey finished."
+                        echo "Monkey selesai"
                     }
 
                     bat """
-                    @curl -s -X POST ^
+                    curl -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
                     --data "hash=${env.APK_HASH}" ^
                     ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
@@ -213,7 +225,7 @@ pipeline {
 
                     def raw = bat(
                         script: """
-                        @curl -s -X POST ^
+                        curl -X POST ^
                         -H "Authorization: ${env.MOBSF_TOKEN}" ^
                         --data "hash=${env.APK_HASH}" ^
                         ${env.MOBSF_URL}/api/v1/dynamic/report_json
@@ -226,20 +238,22 @@ pipeline {
                     if (json) {
                         writeFile file: 'dast_report.json', text: json
                         archiveArtifacts artifacts: 'dast_report.json'
-                        echo "DAST Report: ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
+                        echo "DAST selesai"
                     }
                 }
             }
         }
 
+        // ================= CLEANUP =================
         stage('Cleanup') {
             steps {
-                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator sudah berhenti'
             }
         }
 
     }
 
+    // ================= EMAIL REPORT =================
     post {
         always {
             script {
@@ -247,35 +261,31 @@ pipeline {
                 try {
 
                     emailext(
-                        subject: "Mobile SAST & DAST Report - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
-                        body: """Halo tim!
+                        subject: "Mobile Security Scan - Build #${env.BUILD_NUMBER}",
+                        body: """Halo,
 
-Build pipeline selesai dengan status: ${currentBuild.currentResult}.
+Pipeline Mobile Security selesai.
 
-Laporan lengkap SAST dan DAST terlampir dalam format PDF.
+Status Build: ${currentBuild.currentResult}
+
+Report SAST dan DAST tersedia di Jenkins artifacts.
 
 Terima kasih.
-
-Dikirim otomatis dari Jenkins.
 """,
                         mimeType: 'text/plain',
-                        to: '$DEFAULT_RECIPIENTS',
-                        attachmentsPattern: 'sast_report.pdf,dast_report.pdf',
+                        to: 'syifaamdh@gmail.com',
                         attachLog: true,
-                        compressLog: true,
-                        recipientProviders: []
+                        compressLog: true
                     )
 
-                    echo "Email berhasil dikirim."
+                    echo "Email berhasil dikirim"
 
                 } catch (Exception e) {
 
                     echo "Gagal kirim email: ${e.getMessage()}"
 
                 }
-
             }
         }
     }
-
 }
