@@ -276,6 +276,8 @@ ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 emailext(
     to: 'syifaamdh@gmail.com',
+    from: 'syifaamaraqueen@gmail.com',
+    replyTo: 'syifaamaraqueen@gmail.com',
     recipientProviders: [],
     subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
     body: """
