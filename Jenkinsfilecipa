@@ -242,51 +242,58 @@ pipeline {
                 bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
             }
         }
+stage('Download PDF Report') {
+    steps {
+        script {
+            if (env.APK_HASH) {
+
+                bat """
+                @curl -s -X POST ^
+                -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                --data "hash=${env.APK_HASH}" ^
+                ${env.MOBSF_URL}/api/v1/download_pdf ^
+                -o sast_report.pdf
+                """
+
+                bat """
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
+                --headless ^
+                --disable-gpu ^
+                --print-to-pdf=dast_report.pdf ^
+                ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}
+                """
+
+            } else {
+                echo "APK_HASH not found."
+            }
+        }
+    }
+}
+
+stage('Send Email Manual') {
+    steps {
+        bat """
+        powershell -Command ^
+        $smtpServer = "smtp.gmail.com"; ^
+        $smtpPort = 587; ^
+        $from = "syifaamaraqueen@gmail.com"; ^
+        $to = "syifaamdh@gmail.com"; ^
+        $password = "APP_PASSWORD_KAMU"; ^
+        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force; ^
+        $cred = New-Object System.Management.Automation.PSCredential($from, $securePassword); ^
+        Send-MailMessage -From $from -To $to -Subject "Security Report Jenkins" ^
+        -Body "Laporan PDF terlampir" ^
+        -SmtpServer $smtpServer -Port $smtpPort -UseSsl -Credential $cred ^
+        -Attachments "sast_report.pdf","dast_report.pdf"
+        """
+    }
+}
     }
 
     post {
         always {
-
             archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-
-            script {
-                if (env.APK_HASH) {
-
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${env.APK_HASH}" ^
-                    ${env.MOBSF_URL}/api/v1/download_pdf ^
-                    -o sast_report.pdf
-                    """
-
-bat """
-"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
---headless ^
---disable-gpu ^
---print-to-pdf=dast_report.pdf ^
-${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}
-"""
-
-                } else {
-                    echo "APK_HASH not found. Skipping PDF download."
-                }
-            }
-
             archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-emailext(
-    to: 'syifaamdh@gmail.com',
-    subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-    body: """
-Build Status: ${currentBuild.currentResult}
-
-Laporan PDF terlampir sebagai attachment.
-""",
-    attachmentsPattern: '*.pdf',
-    mimeType: 'text/plain',
-    attachLog: true,
-    recipientProviders: []
-)
         }
     }
 }
