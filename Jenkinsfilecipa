@@ -274,16 +274,16 @@ stage('Send Email Manual') {
     steps {
         bat """
         powershell -Command ^
-        $smtpServer = "smtp.gmail.com"; ^
-        $smtpPort = 587; ^
-        $from = "syifaamaraqueen@gmail.com"; ^
-        $to = "syifaamdh@gmail.com"; ^
-        $password = "APP_PASSWORD_KAMU"; ^
-        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force; ^
-        $cred = New-Object System.Management.Automation.PSCredential($from, $securePassword); ^
-        Send-MailMessage -From $from -To $to -Subject "Security Report Jenkins" ^
+        \$smtpServer = "smtp.gmail.com"; ^
+        \$smtpPort = 587; ^
+        \$from = "syifaamaraqueen@gmail.com"; ^
+        \$to = "syifaamdh@gmail.com"; ^
+        \$password = "APP_PASSWORD_KAMU"; ^
+        \$securePassword = ConvertTo-SecureString \$password -AsPlainText -Force; ^
+        \$cred = New-Object System.Management.Automation.PSCredential(\$from, \$securePassword); ^
+        Send-MailMessage -From \$from -To \$to -Subject "Security Report Jenkins" ^
         -Body "Laporan PDF terlampir" ^
-        -SmtpServer $smtpServer -Port $smtpPort -UseSsl -Credential $cred ^
+        -SmtpServer \$smtpServer -Port \$smtpPort -UseSsl -Credential \$cred ^
         -Attachments "sast_report.pdf","dast_report.pdf"
         """
     }
