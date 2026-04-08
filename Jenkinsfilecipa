@@ -285,8 +285,7 @@ Laporan PDF terlampir sebagai attachment.
     attachmentsPattern: '*.pdf',
     mimeType: 'text/plain',
     attachLog: true,
-    recipientProviders: [],
-    overrideGlobalSettings: true   // 🔥 INI KUNCI UTAMA
+    recipientProviders: []
 )
         }
     }
