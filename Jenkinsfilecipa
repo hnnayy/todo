@@ -1,6 +1,6 @@
 import groovy.json.JsonSlurperClassic
 
-// ================= HELPER =================
+// ================= HELPER METHODS =================
 @NonCPS
 def extractHashFromResponse(String response) {
     def matcher = response =~ /"hash"\s*:\s*"([^"]+)"/
@@ -23,7 +23,7 @@ pipeline {
         choice(
             name: 'BUILD_TYPE',
             choices: ['debug', 'release'],
-            description: 'Tipe build APK'
+            description: 'Pilih tipe build APK (Release direkomendasikan untuk audit)'
         )
     }
 
@@ -31,7 +31,7 @@ pipeline {
         ANDROID_HOME     = "C:\\Users\\Lenovo\\AppData\\Local\\Android\\Sdk"
         ANDROID_SDK_ROOT = "${ANDROID_HOME}"
         FLUTTER_HOME     = "D:\\flutter"
-        JAVA_HOME        = "C:\\Program Files\\Eclipse Adoptium\\jdk-17"
+        JAVA_HOME        = "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot"
 
         PATH = "${FLUTTER_HOME}\\bin;${JAVA_HOME}\\bin;${ANDROID_HOME}\\platform-tools;${ANDROID_HOME}\\emulator;${env.PATH}"
 
@@ -40,8 +40,6 @@ pipeline {
 
         MOBSF_URL   = "http://localhost:8000"
         MOBSF_TOKEN = "ISI_TOKEN_KAMU"
-
-        EMAIL_TO    = "syifaamdh@gmail.com"
     }
 
     stages {
@@ -54,27 +52,45 @@ pipeline {
         }
 
         // ================= PREPARE =================
-        stage('Prepare') {
+        stage('Prepare Workspace') {
             steps {
                 bat 'if not exist apk-outputs mkdir apk-outputs'
             }
         }
 
-        // ================= BUILD =================
+        // ================= FLUTTER ENV =================
+        stage('Flutter Environment Check') {
+            steps {
+                bat """
+                git config --global --add safe.directory "%WORKSPACE%"
+                flutter config --jdk-dir "${env.JAVA_HOME}"
+                flutter doctor -v
+                """
+            }
+        }
+
+        // ================= BUILD APK =================
         stage('Build APK') {
             steps {
                 bat """
                 flutter pub get
                 flutter build apk --${params.BUILD_TYPE}
+                dir build\\app\\outputs\\flutter-apk
                 """
             }
         }
 
         // ================= SAST =================
-        stage('SAST - MobSF') {
+        stage('SAST - Static Analysis (MobSF)') {
             steps {
                 script {
                     def apkPath = "build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk"
+
+                    if (!fileExists(apkPath)) {
+                        error "APK not found: ${apkPath}"
+                    }
+
+                    echo "Uploading APK to MobSF..."
 
                     def uploadResponse = bat(
                         script: """
@@ -86,27 +102,37 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    def hash = extractHashFromResponse(uploadResponse)
-                    if (!hash) error "Upload gagal"
+                    echo "MobSF Response: ${uploadResponse}"
 
-                    env.APK_HASH = hash
+                    def apkHash = extractHashFromResponse(uploadResponse)
+                    if (!apkHash) error "MobSF upload failed (hash kosong)"
+
+                    env.APK_HASH = apkHash
 
                     // Scan
                     bat """
                     @curl -s -X POST ^
                     -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${hash}" ^
+                    --data "hash=${apkHash}" ^
                     ${env.MOBSF_URL}/api/v1/scan
                     """
 
-                    // Download PDF
-                    bat """
-                    @curl -s -X POST ^
-                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                    --data "hash=${hash}" ^
-                    ${env.MOBSF_URL}/api/v1/download_pdf ^
-                    -o sast_report.pdf
-                    """
+                    // JSON report
+                    def rawReport = bat(
+                        script: """
+                        @curl -s -X POST ^
+                        -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                        --data "hash=${apkHash}" ^
+                        ${env.MOBSF_URL}/api/v1/report_json
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    def json = cleanJsonString(rawReport)
+                    if (json) {
+                        writeFile file: 'sast_report.json', text: json
+                        archiveArtifacts artifacts: 'sast_report.json'
+                    }
                 }
             }
         }
@@ -117,27 +143,37 @@ pipeline {
                 bat """
                 start /b "" "${env.ANDROID_HOME}\\emulator\\emulator.exe" ^
                 -avd "${env.AVD_NAME}" ^
-                -no-window -no-audio -wipe-data
+                -no-window -no-audio ^
+                -gpu swiftshader_indirect -wipe-data
                 """
                 sleep 60
                 bat "adb wait-for-device"
+                bat "adb shell getprop sys.boot_completed"
             }
         }
 
-        // ================= INSTALL =================
+        // ================= INSTALL APK =================
         stage('Install APK') {
             steps {
-                bat """
-                adb uninstall ${env.APP_PACKAGE} || echo skip
-                adb install build/app/outputs/flutter-apk/app-${params.BUILD_TYPE}.apk
-                """
+                script {
+                    def timestamp  = new Date().format("dd-MM-yyyy_HH-mm-ss")
+                    def sourcePath = "build\\app\\outputs\\flutter-apk\\app-${params.BUILD_TYPE}.apk"
+                    def destPath   = "apk-outputs\\todo-${params.BUILD_TYPE}-${timestamp}.apk"
+
+                    bat "copy \"${sourcePath}\" \"${destPath}\""
+
+                    bat(script: "adb uninstall ${env.APP_PACKAGE}", returnStatus: true)
+                    bat "adb install -r \"${destPath}\""
+                }
             }
         }
 
         // ================= DAST =================
-        stage('DAST - MobSF') {
+        stage('DAST - Dynamic Analysis (MobSF)') {
             steps {
                 script {
+                    bat "adb shell input keyevent 82"
+                    sleep 2
 
                     bat """
                     @curl -s -X POST ^
@@ -146,11 +182,20 @@ pipeline {
                     ${env.MOBSF_URL}/api/v1/dynamic/start_analysis
                     """
 
-                    sleep 30
+                    sleep 25
 
                     bat """
-                    adb shell monkey -p ${env.APP_PACKAGE} -v 200
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}&default_hooks=api_monitor,ssl_pinning_bypass,root_bypass,debugger_check_bypass" ^
+                    ${env.MOBSF_URL}/api/v1/frida/instrument
                     """
+
+                    try {
+                        bat "adb shell monkey -p ${env.APP_PACKAGE} --pct-syskeys 0 --throttle 1500 -v 200"
+                    } catch (Exception e) {
+                        echo "Monkey finished."
+                    }
 
                     bat """
                     @curl -s -X POST ^
@@ -158,8 +203,37 @@ pipeline {
                     --data "hash=${env.APK_HASH}" ^
                     ${env.MOBSF_URL}/api/v1/dynamic/stop_analysis
                     """
+                }
+            }
+        }
 
-                    // Convert ke PDF (HEADLESS CHROME)
+        // ================= CLEANUP =================
+        stage('Cleanup') {
+            steps {
+                bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo Emulator already stopped'
+            }
+        }
+    }
+
+    // ================= POST =================
+    post {
+        always {
+
+            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+
+            script {
+                if (env.APK_HASH) {
+
+                    // ===== DOWNLOAD SAST PDF =====
+                    bat """
+                    @curl -s -X POST ^
+                    -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                    --data "hash=${env.APK_HASH}" ^
+                    ${env.MOBSF_URL}/api/v1/download_pdf ^
+                    -o sast_report.pdf
+                    """
+
+                    // ===== CONVERT DAST → PDF =====
                     bat """
                     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
                     --headless ^
@@ -167,37 +241,26 @@ pipeline {
                     --print-to-pdf=dast_report.pdf ^
                     ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}
                     """
+
+                } else {
+                    echo "APK_HASH not found. Skip PDF"
                 }
             }
-        }
 
-        // ================= ARCHIVE =================
-        stage('Archive') {
-            steps {
-                archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-            }
-        }
-    }
+            // ===== ARCHIVE PDF =====
+            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
 
-    // ================= EMAIL =================
-    post {
-        always {
-            script {
-                emailext(
-                    to: "${env.EMAIL_TO}",
-                    subject: "Security Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
+            // ===== 🔥 EMAIL + ATTACHMENT =====
+            mail(
+                to: 'syifaamdh@gmail.com',
+                subject: "Security Scan PDF Report - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
 Build Status: ${currentBuild.currentResult}
 
-SAST & DAST report terlampir dalam bentuk PDF.
+Laporan SAST & DAST dalam bentuk PDF terlampir.
 """,
-                    attachmentsPattern: '*.pdf'
-                )
-            }
-        }
-
-        cleanup {
-            bat 'taskkill /F /IM qemu-system-x86_64.exe /T || echo emulator sudah mati'
+                attachmentsPattern: '*.pdf'
+            )
         }
     }
 }
