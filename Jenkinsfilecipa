@@ -288,7 +288,7 @@ $cred = New-Object System.Management.Automation.PSCredential($from, $securePassw
 Send-MailMessage -From $from -To $to -Subject "Security Report Jenkins" `
 -Body "Laporan PDF terlampir" `
 -SmtpServer $smtpServer -Port $smtpPort -UseSsl -Credential $cred `
--Attachments "sast_report.pdf","dast_report.pdf"
+-Attachments "sast_report.pdf","dast_report.json"
 '''
         bat 'powershell -ExecutionPolicy Bypass -File send_email.ps1'
     }
