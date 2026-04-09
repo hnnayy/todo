@@ -259,9 +259,11 @@ bat """
 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
 --headless ^
 --disable-gpu ^
+--no-sandbox ^
+--disable-dev-shm-usage ^
+--user-data-dir=C:\\chrome-session ^
 --virtual-time-budget=20000 ^
 --run-all-compositor-stages-before-draw ^
---disable-dev-shm-usage ^
 --print-to-pdf=dast_report.pdf ^
 ${env.MOBSF_URL}/dynamic_report/${env.APK_HASH}
 """
@@ -288,7 +290,7 @@ $cred = New-Object System.Management.Automation.PSCredential($from, $securePassw
 Send-MailMessage -From $from -To $to -Subject "Security Report Jenkins" `
 -Body "Laporan PDF terlampir" `
 -SmtpServer $smtpServer -Port $smtpPort -UseSsl -Credential $cred `
--Attachments "sast_report.pdf","dast_report.json"
+-Attachments "sast_report.pdf","dast_report.pdf"
 '''
         bat 'powershell -ExecutionPolicy Bypass -File send_email.ps1'
     }
