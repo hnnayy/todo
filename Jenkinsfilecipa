@@ -230,7 +230,7 @@ pipeline {
                     if (json) {
                         writeFile file: 'dast_report.json', text: json
                         archiveArtifacts artifacts: 'dast_report.json, tls_report.json', allowEmptyArchive: true
-                        echo "✅ DAST Report URL: ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}/"
+                        echo "✅ DAST Report URL: ${env.MOBSF_URL}/dynamic_report/${env.APK_HASH}/ "
                     }
                 }
             }
@@ -255,13 +255,14 @@ stage('Download PDF Report') {
                 -o sast_report.pdf
                 """
 
-                bat """
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
-                --headless ^
-                --disable-gpu ^
-                --print-to-pdf=dast_report.pdf ^
-                ${env.MOBSF_URL}/dynamic_analyzer/${env.APK_HASH}
-                """
+bat """
+"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
+--headless ^
+--disable-gpu ^
+--virtual-time-budget=10000 ^
+--print-to-pdf=dast_report.pdf ^
+${env.MOBSF_URL}/dynamic_report/${env.APK_HASH}
+"""
 
             } else {
                 echo "APK_HASH not found."
