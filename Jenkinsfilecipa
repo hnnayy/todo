@@ -277,8 +277,6 @@ stage('Download PDF Report') {
 stage('Send Email Manual') {
     steps {
         writeFile file: 'send_email.ps1', text: '''
-Add-Type -AssemblyName System.Net.Mail
-
 $smtpServer = "smtp.gmail.com"
 $smtpPort = 587
 $from = "syifaamaraqueen@gmail.com"
@@ -291,7 +289,7 @@ $mail.To.Add($to)
 $mail.Subject = "Security Report Jenkins"
 $mail.Body = "Laporan PDF terlampir"
 
-# ATTACHMENT (FIX)
+# ATTACHMENT
 $att1 = New-Object System.Net.Mail.Attachment("sast_report.pdf")
 $att2 = New-Object System.Net.Mail.Attachment("dast_report.pdf")
 
