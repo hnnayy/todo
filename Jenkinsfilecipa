@@ -247,24 +247,24 @@ stage('Download PDF Report') {
         script {
             if (env.APK_HASH) {
 
+                echo "Downloading SAST PDF (custom)..."
                 bat """
-                @curl -s -X POST ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
-                --data "hash=${env.APK_HASH}" ^
-                ${env.MOBSF_URL}/api/v1/download_pdf ^
+                @curl -L ^
+                ${env.MOBSF_URL}/download_pdf/${env.APK_HASH} ^
                 -o sast_report.pdf
                 """
 
-                echo "Downloading DAST PDF (Custom)..."
+                echo "Downloading DAST PDF (custom)..."
                 bat """
                 @curl -L ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
                 ${env.MOBSF_URL}/download_dast_pdf/${env.APK_HASH} ^
                 -o dast_report.pdf
                 """
 
+                archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
+
             } else {
-                echo "APK_HASH not found."
+                error "APK_HASH not found."
             }
         }
     }
