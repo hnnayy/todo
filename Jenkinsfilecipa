@@ -277,29 +277,33 @@ stage('Download PDF Report') {
 stage('Send Email Manual') {
     steps {
         writeFile file: 'send_email.ps1', text: '''
+Add-Type -AssemblyName System.Net.Mail
+
 $smtpServer = "smtp.gmail.com"
 $smtpPort = 587
 $from = "syifaamaraqueen@gmail.com"
 $to = "syifaamdh@gmail.com"
 $password = "jliqvpgmligkkkrv"
 
-$securePassword = ConvertTo-SecureString $password -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential($from, $securePassword)
+$mail = New-Object System.Net.Mail.MailMessage
+$mail.From = $from
+$mail.To.Add($to)
+$mail.Subject = "Security Report Jenkins"
+$mail.Body = "Laporan PDF terlampir"
 
-Send-MailMessage -From $from -To $to -Subject "Security Report Jenkins" `
--Body "Laporan PDF terlampir" `
--SmtpServer $smtpServer -Port $smtpPort -UseSsl -Credential $cred `
--Attachments "sast_report.pdf","dast_report.pdf"
+# ATTACHMENT (FIX)
+$att1 = New-Object System.Net.Mail.Attachment("sast_report.pdf")
+$att2 = New-Object System.Net.Mail.Attachment("dast_report.pdf")
+
+$mail.Attachments.Add($att1)
+$mail.Attachments.Add($att2)
+
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+$smtp.EnableSsl = $true
+$smtp.Credentials = New-Object System.Net.NetworkCredential($from, $password)
+
+$smtp.Send($mail)
 '''
         bat 'powershell -ExecutionPolicy Bypass -File send_email.ps1'
-    }
-}
-    }
-
-    post {
-        always {
-            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
-            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
-        }
     }
 }
