@@ -255,18 +255,13 @@ stage('Download PDF Report') {
                 -o sast_report.pdf
                 """
 
-bat """
-"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^
---headless ^
---disable-gpu ^
---no-sandbox ^
---disable-dev-shm-usage ^
---user-data-dir=C:\\chrome-session ^
---virtual-time-budget=20000 ^
---run-all-compositor-stages-before-draw ^
---print-to-pdf=dast_report.pdf ^
-${env.MOBSF_URL}/dynamic_report/${env.APK_HASH}
-"""
+                echo "Downloading DAST PDF (Custom)..."
+                bat """
+                @curl -L ^
+                -H "Authorization: ${env.MOBSF_TOKEN}" ^
+                ${env.MOBSF_URL}/download_dast_pdf/${env.APK_HASH} ^
+                -o dast_report.pdf
+                """
 
             } else {
                 echo "APK_HASH not found."
