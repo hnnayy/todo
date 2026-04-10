@@ -270,6 +270,14 @@ stage('Download PDF Report') {
             } else {
                 echo "APK_HASH not found."
             }
+            def size = bat(
+                script: 'for %%I in (dast_report.pdf) do @echo %%~zI',
+                returnStdout: true
+            ).trim()
+
+            if (size.toInteger() < 50000) {
+                error "DAST PDF INVALID (too small)"
+            }
         }
     }
 }
