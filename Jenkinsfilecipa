@@ -258,13 +258,14 @@ stage('Download PDF Report') {
                 bat """
                 @curl -L -f ^
                 ${env.MOBSF_URL}/dynamic_pdf/${env.APK_HASH}/ ^
-                -o dast_report.pdf
+                --output dast_report.pdf --silent --show-error
                 """
 
                 sleep 2
  
 
                 bat "dir dast_report.pdf"
+                bat "for %I in (dast_report.pdf) do @echo Size: %~zI bytes"
 
             } else {
                 echo "APK_HASH not found."
