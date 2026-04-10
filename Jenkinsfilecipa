@@ -307,3 +307,12 @@ $smtp.Send($mail)
         bat 'powershell -ExecutionPolicy Bypass -File send_email.ps1'
     }
 }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'apk-outputs/*.apk', allowEmptyArchive: true
+            archiveArtifacts artifacts: '*.pdf', allowEmptyArchive: true
+        }
+    }
+}
