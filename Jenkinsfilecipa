@@ -261,7 +261,7 @@ stage('Download PDF Report') {
                 -o dast_report.pdf
                 """
 
-                bat "timeout /t 2 >nul"
+                sleep 2
                 bat "type dast_report.pdf"
 
             } else {
