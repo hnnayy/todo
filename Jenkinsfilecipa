@@ -265,7 +265,7 @@ stage('Download PDF Report') {
  
 
                 bat "dir dast_report.pdf"
-                bat "for %I in (dast_report.pdf) do @echo Size: %~zI bytes"
+                bat "for %%I in (dast_report.pdf) do @echo Size: %%~zI bytes"
 
             } else {
                 echo "APK_HASH not found."
