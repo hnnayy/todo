@@ -254,14 +254,15 @@ stage('Download PDF Report') {
                 ${env.MOBSF_URL}/api/v1/download_pdf ^
                 -o sast_report.pdf
                 """
-
                 echo "Downloading DAST PDF (Custom)..."
                 bat """
                 @curl -L -f ^
-                -H "Authorization: ${env.MOBSF_TOKEN}" ^
                 ${env.MOBSF_URL}/dynamic_pdf/${env.APK_HASH}/ ^
                 -o dast_report.pdf
                 """
+
+                bat "timeout /t 2 >nul"
+                bat "type dast_report.pdf"
 
             } else {
                 echo "APK_HASH not found."
