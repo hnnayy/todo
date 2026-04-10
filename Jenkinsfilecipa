@@ -262,7 +262,9 @@ stage('Download PDF Report') {
                 """
 
                 sleep 2
-                bat "type dast_report.pdf"
+ 
+
+                bat "dir dast_report.pdf"
 
             } else {
                 echo "APK_HASH not found."
