@@ -257,7 +257,7 @@ stage('Download PDF Report') {
 
                 echo "Downloading DAST PDF (Custom)..."
                 bat """
-                @curl -L ^
+                @curl -L -f ^
                 -H "Authorization: ${env.MOBSF_TOKEN}" ^
                 ${env.MOBSF_URL}/dynamic_pdf/${env.APK_HASH}/ ^
                 -o dast_report.pdf
