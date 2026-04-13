@@ -289,7 +289,7 @@ $smtpServer = "smtp.gmail.com"
 $smtpPort = 587
 $from = "syifaamaraqueen@gmail.com"
 $to = "syifaamdh@gmail.com"
-$password = "jliqvpgmligkkkrv"
+$password = "lyftygsebuyndied"
 
 $mail = New-Object System.Net.Mail.MailMessage
 $mail.From = $from
@@ -309,6 +309,7 @@ $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
 $smtp.EnableSsl = $true
 $smtp.UseDefaultCredentials = $false
 $smtp.Credentials = New-Object System.Net.NetworkCredential($from, $password)
+$smtp.Timeout = 10000
 
 $smtp.Send($mail)
 '''
