@@ -294,6 +294,7 @@ $password = "jliqvpgmligkkkrv"
 $mail = New-Object System.Net.Mail.MailMessage
 $mail.From = $from
 $mail.To.Add($to)
+
 $mail.Subject = "Security Report Jenkins"
 $mail.Body = "Laporan PDF terlampir"
 
@@ -306,6 +307,7 @@ $mail.Attachments.Add($att2)
 
 $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
 $smtp.EnableSsl = $true
+$smtp.UseDefaultCredentials = $false
 $smtp.Credentials = New-Object System.Net.NetworkCredential($from, $password)
 
 $smtp.Send($mail)
