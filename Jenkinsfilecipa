@@ -285,8 +285,6 @@ stage('Download PDF Report') {
 stage('Send Email Manual') {
     steps {
         writeFile file: 'send_email.ps1', text: '''
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-
 $smtpServer = "smtp.gmail.com"
 $smtpPort = 587
 $from = "syifaamaraqueen@gmail.com"
@@ -296,9 +294,11 @@ $password = "lyftygsebuyndied"
 $mail = New-Object System.Net.Mail.MailMessage
 $mail.From = $from
 $mail.To.Add($to)
+
 $mail.Subject = "Security Report Jenkins"
 $mail.Body = "Laporan PDF terlampir"
 
+# ATTACHMENT
 $att1 = New-Object System.Net.Mail.Attachment("sast_report.pdf")
 $att2 = New-Object System.Net.Mail.Attachment("dast_report.pdf")
 
@@ -309,8 +309,7 @@ $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
 $smtp.EnableSsl = $true
 $smtp.UseDefaultCredentials = $false
 $smtp.Credentials = New-Object System.Net.NetworkCredential($from, $password)
-$smtp.DeliveryMethod = [System.Net.Mail.SmtpDeliveryMethod]::Network
-$smtp.Timeout = 30000
+$smtp.Timeout = 10000
 
 $smtp.Send($mail)
 '''
